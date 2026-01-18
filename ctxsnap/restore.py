@@ -21,6 +21,7 @@ def open_folder(path: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
+        path = path.expanduser()
         if not path.exists():
             msg = f"Folder does not exist: {path}"
             LOGGER.warning(msg)
@@ -43,6 +44,7 @@ def open_terminal_at(path: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
+        path = path.expanduser()
         if not path.exists():
             msg = f"Path does not exist: {path}"
             LOGGER.warning(msg)
@@ -72,6 +74,7 @@ def open_vscode_at(target: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
+        target = target.expanduser()
         code = shutil.which("code")
         if not code:
             msg = "'code' command not found in PATH"
@@ -109,4 +112,3 @@ def resolve_vscode_target(snap: Dict[str, Any]) -> Path:
             return root_path
     
     return Path.home()
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import fnmatch
 import logging
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -37,7 +38,8 @@ def recent_files_under(
     scan_limit: int = 20000,
     scan_seconds: float = 2.0,
 ) -> List[str]:
-    if not root.exists():
+    if not root.exists() or not root.is_dir():
+        LOGGER.warning("Recent file scan root invalid: %s", root)
         return []
     exclude = {d.lower() for d in (exclude_dirs or [])}
     include_globs = [p.lower() for p in (include_patterns or []) if p.strip()]
@@ -46,31 +48,44 @@ def recent_files_under(
     start = time.monotonic()
     scanned = 0
     truncated_reason: Optional[str] = None
-    for p in root.rglob("*"):
-        try:
-            if p.is_dir():
-                continue
-            if any(part.lower() in exclude for part in p.parts):
-                continue
-            if exclude and any(fnmatch.fnmatch(p.as_posix().lower(), f"*{pattern.lower()}*") for pattern in exclude):
-                continue
-            if exclude_globs and any(fnmatch.fnmatch(p.as_posix().lower(), pat) for pat in exclude_globs):
-                continue
-            if include_globs and not any(fnmatch.fnmatch(p.as_posix().lower(), pat) for pat in include_globs):
-                continue
-            if any(part.startswith(".") for part in p.parts):
-                continue
-            st = p.stat()
-            files.append((st.st_mtime, p))
-            scanned += 1
-            if scanned >= scan_limit:
-                truncated_reason = "scan_limit"
-                break
-            if time.monotonic() - start >= scan_seconds:
-                truncated_reason = "scan_seconds"
-                break
-        except (PermissionError, FileNotFoundError):
+    for base, dirs, filenames in os.walk(root):
+        base_path = Path(base)
+        if any(part.startswith(".") for part in base_path.parts):
+            dirs[:] = []
             continue
+        dirs[:] = [
+            d for d in dirs
+            if not d.startswith(".") and d.lower() not in exclude
+        ]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            p = base_path / name
+            try:
+                if any(part.lower() in exclude for part in p.parts):
+                    continue
+                path_str = p.as_posix().lower()
+                if exclude and any(fnmatch.fnmatch(path_str, f"*{pattern.lower()}*") for pattern in exclude):
+                    continue
+                if exclude_globs and any(fnmatch.fnmatch(path_str, pat) for pat in exclude_globs):
+                    continue
+                if include_globs and not any(fnmatch.fnmatch(path_str, pat) for pat in include_globs):
+                    continue
+                st = p.stat()
+                files.append((st.st_mtime, p))
+                scanned += 1
+                if scanned >= scan_limit:
+                    truncated_reason = "scan_limit"
+                    dirs[:] = []
+                    break
+                if time.monotonic() - start >= scan_seconds:
+                    truncated_reason = "scan_seconds"
+                    dirs[:] = []
+                    break
+            except (PermissionError, FileNotFoundError):
+                continue
+        if truncated_reason:
+            break
     if truncated_reason:
         LOGGER.info(
             "Recent file scan truncated (%s): root=%s scanned=%s limit=%s seconds=%.2f",
@@ -113,7 +128,11 @@ def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Dict[s
 
 
 def list_running_apps() -> List[Dict[str, object]]:
-    user32 = ctypes.windll.user32
+    try:
+        user32 = ctypes.windll.user32
+    except (AttributeError, OSError) as exc:
+        LOGGER.warning("Windows APIs unavailable for running app scan: %s", exc)
+        return []
     get_window_text_length = user32.GetWindowTextLengthW
     get_window_text = user32.GetWindowTextW
     is_window_visible = user32.IsWindowVisible
@@ -178,7 +197,13 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
             continue
     for app in apps:
         exe = str(app.get("exe") or "").strip()
-        cmdline = app.get("cmdline") or []
+        raw_cmdline = app.get("cmdline")
+        if isinstance(raw_cmdline, (list, tuple)):
+            cmdline = list(raw_cmdline)
+        elif raw_cmdline:
+            cmdline = [str(raw_cmdline)]
+        else:
+            cmdline = []
         exe_lower = exe.lower() if exe else ""
         if exe_lower and exe_lower in running:
             continue
