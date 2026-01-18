@@ -149,8 +149,9 @@ class SnapshotListModel(QtCore.QAbstractListModel):
             created = item.get("created_at", "")
             tags = item.get("tags", []) or []
             pin = "📌 " if bool(item.get("pinned", False)) else ""
+            archived = "🗄️ " if bool(item.get("archived", False)) else ""
             tag_badge = f"[{', '.join(tags)}] " if tags else ""
-            text = f"{pin}{tag_badge}{title}\n{root}   •   {created}"
+            text = f"{pin}{archived}{tag_badge}{title}\n{root}   •   {created}"
             self._display_cache[sid] = text
             return text
         if role == QtCore.Qt.UserRole:
@@ -674,6 +675,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.background_recent = QtWidgets.QCheckBox("Collect recent files in background")
         self.background_recent.setToolTip("스냅샷을 먼저 저장하고, 최근 파일 목록을 백그라운드에서 채웁니다.")
         self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
+        self.page_size_spin = QtWidgets.QSpinBox()
+        self.page_size_spin.setRange(20, 2000)
+        self.page_size_spin.setValue(int(settings.get("list_page_size", 200)))
+        self.page_size_spin.setSuffix(" per page")
         self.auto_snapshot_minutes = QtWidgets.QSpinBox()
         self.auto_snapshot_minutes.setRange(0, 1440)
         self.auto_snapshot_minutes.setSuffix(" min")
@@ -704,6 +709,10 @@ class SettingsDialog(QtWidgets.QDialog):
         scan_row.addWidget(self.scan_limit_spin)
         scan_row.addWidget(self.scan_seconds_spin)
         scan_row.addWidget(self.background_recent)
+        page_row = QtWidgets.QHBoxLayout()
+        page_row.addWidget(QtWidgets.QLabel("Snapshot list page size"))
+        page_row.addStretch(1)
+        page_row.addWidget(self.page_size_spin)
         auto_row = QtWidgets.QHBoxLayout()
         auto_row.addWidget(QtWidgets.QLabel("Auto snapshot interval"))
         auto_row.addStretch(1)
@@ -720,6 +729,7 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addLayout(rf_row)
         general_layout.addLayout(capture_row)
         general_layout.addLayout(scan_row)
+        general_layout.addLayout(page_row)
         general_layout.addLayout(auto_row)
         general_layout.addWidget(self.auto_snapshot_on_git)
         general_layout.addWidget(QtWidgets.QLabel("Exclude folders for recent file scan"))
@@ -929,6 +939,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
         self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
         self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
+        self.page_size_spin.setValue(int(settings.get("list_page_size", 200)))
         self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
         self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
         capture = settings.get("capture", {})
@@ -996,6 +1007,7 @@ class SettingsDialog(QtWidgets.QDialog):
             "recent_files_scan_limit": int(self.scan_limit_spin.value()),
             "recent_files_scan_seconds": float(self.scan_seconds_spin.value()),
             "recent_files_background": bool(self.background_recent.isChecked()),
+            "list_page_size": int(self.page_size_spin.value()),
             "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
             "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
             "recent_files_exclude": [
@@ -1237,6 +1249,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if "pinned" not in it:
                 it["pinned"] = False
                 changed = True
+            if "archived" not in it:
+                it["archived"] = False
+                changed = True
             if "vscode_workspace" not in it:
                 it["vscode_workspace"] = ""
                 changed = True
@@ -1248,11 +1263,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Search snapshots (title/root/note/todo/files/apps)...")
-        self.search.textChanged.connect(self.refresh_list)
+        self.search.textChanged.connect(self._reset_pagination_and_refresh)
         self.search_btn_clear = QtWidgets.QToolButton()
         self.search_btn_clear.setText("Clear")
         self.search_btn_clear.setToolTip("Clear search")
-        self.search_btn_clear.clicked.connect(self.search.clear)
+        self.search_btn_clear.clicked.connect(self._clear_search)
 
         self.selected_tags: set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
@@ -1262,14 +1277,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.days_filter = QtWidgets.QComboBox()
         self.days_filter.addItems(["All time", "Last 1 day", "Last 3 days", "Last 7 days", "Last 30 days"])
-        self.days_filter.currentIndexChanged.connect(self.refresh_list)
+        self.days_filter.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.sort_combo = QtWidgets.QComboBox()
         self.sort_combo.addItems(["Newest", "Oldest", "Pinned first", "Title"])
-        self.sort_combo.currentIndexChanged.connect(self.refresh_list)
+        self.sort_combo.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.pinned_only = QtWidgets.QCheckBox("Pinned only")
-        self.pinned_only.stateChanged.connect(self.refresh_list)
+        self.pinned_only.stateChanged.connect(self._reset_pagination_and_refresh)
+
+        self.show_archived = QtWidgets.QCheckBox("Show archived")
+        self.show_archived.stateChanged.connect(self._reset_pagination_and_refresh)
 
         self.listw = QtWidgets.QListView()
         self.listw.setUniformItemSizes(False)
@@ -1294,6 +1312,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_settings = QtWidgets.QPushButton("Settings")
         btn_restore = QtWidgets.QPushButton("Restore")
         btn_pin = QtWidgets.QPushButton("Pin / Unpin")
+        btn_archive = QtWidgets.QPushButton("Archive / Unarchive")
         btn_restore_last = QtWidgets.QPushButton("Restore Last")
         btn_open_root = QtWidgets.QPushButton("Open Root Folder")
         btn_open_vscode = QtWidgets.QPushButton("Open in VSCode")
@@ -1308,6 +1327,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_open_vscode.clicked.connect(self.open_selected_vscode)
         btn_delete.clicked.connect(self.delete_selected)
         btn_pin.clicked.connect(self.toggle_pin)
+        btn_archive.clicked.connect(self.toggle_archive)
 
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
@@ -1317,11 +1337,26 @@ class MainWindow(QtWidgets.QMainWindow):
         search_row.addWidget(self.days_filter)
         search_row.addWidget(self.sort_combo)
         search_row.addWidget(self.pinned_only)
+        search_row.addWidget(self.show_archived)
         left.addLayout(search_row)
         left.addWidget(self.listw, 1)
         self.result_label = QtWidgets.QLabel("")
         self.result_label.setObjectName("HintLabel")
         left.addWidget(self.result_label)
+        page_row = QtWidgets.QHBoxLayout()
+        self.page_prev_btn = QtWidgets.QToolButton()
+        self.page_prev_btn.setText("Prev")
+        self.page_prev_btn.clicked.connect(self._prev_page)
+        self.page_next_btn = QtWidgets.QToolButton()
+        self.page_next_btn.setText("Next")
+        self.page_next_btn.clicked.connect(self._next_page)
+        self.page_label = QtWidgets.QLabel("")
+        self.page_label.setObjectName("HintLabel")
+        page_row.addWidget(self.page_prev_btn)
+        page_row.addWidget(self.page_next_btn)
+        page_row.addStretch(1)
+        page_row.addWidget(self.page_label)
+        left.addLayout(page_row)
         left_btns = QtWidgets.QHBoxLayout()
         left_btns.addWidget(btn_new)
         left_btns.addWidget(self.btn_quick)
@@ -1342,6 +1377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_btns2 = QtWidgets.QHBoxLayout()
         right_btns2.addStretch(1)
         right_btns2.addWidget(btn_pin)
+        right_btns2.addWidget(btn_archive)
         right_btns2.addWidget(btn_delete)
         right_btns2.addWidget(btn_restore_last)
         right_btns2.addWidget(btn_restore)
@@ -1360,7 +1396,9 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setSizes([360, 660])
         root_layout.addWidget(splitter, 1)
 
-        self.refresh_list()
+        self._current_page = 1
+        self._total_pages = 1
+        self.refresh_list(reset_page=True)
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))
 
@@ -1442,7 +1480,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 it["search_blob_mtime"] = snap_mtime
                 break
         save_json(self.index_path, self.index)
-        self.refresh_list()
+        self.refresh_list(reset_page=False)
         self.statusBar().showMessage("Recent files updated in background.", 2500)
 
     def _on_recent_files_failed(self, sid: str, error: str) -> None:
@@ -1472,17 +1510,40 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.selected_tags.add(tag)
             else:
                 self.selected_tags.discard(tag)
-        self.refresh_list()
+        self._reset_pagination_and_refresh()
 
     def _clear_tag_filter(self) -> None:
         self.selected_tags.clear()
         self._build_tag_menu()
-        self.refresh_list()
+        self._reset_pagination_and_refresh()
 
     # ----- index helpers -----
-    def refresh_list(self) -> None:
+    def _clear_search(self) -> None:
+        self.search.clear()
+
+    def _reset_pagination_and_refresh(self) -> None:
+        self._current_page = 1
+        self.refresh_list(reset_page=False)
+
+    def _update_pagination_controls(self) -> None:
+        self.page_prev_btn.setEnabled(self._current_page > 1)
+        self.page_next_btn.setEnabled(self._current_page < self._total_pages)
+        self.page_label.setText(f"Page {self._current_page} / {self._total_pages}")
+
+    def _prev_page(self) -> None:
+        if self._current_page > 1:
+            self._current_page -= 1
+            self.refresh_list(reset_page=False)
+
+    def _next_page(self) -> None:
+        if self._current_page < self._total_pages:
+            self._current_page += 1
+            self.refresh_list(reset_page=False)
+
+    def refresh_list(self, *, reset_page: bool = False) -> None:
         query = self.search.text().strip().lower()
         pinned_only = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
+        show_archived = bool(self.show_archived.isChecked()) if hasattr(self, "show_archived") else False
 
         items = list(self.index.get("snapshots", []))
         index_changed = False
@@ -1511,6 +1572,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for it in items:
             tags = it.get("tags", []) or []
             if self.selected_tags and not self.selected_tags.intersection(tags):
+                continue
+            if bool(it.get("archived", False)) and not show_archived:
                 continue
             base_hay = f"{it.get('title','')} {it.get('root','')} {' '.join(tags)}".lower()
             if query and query not in base_hay:
@@ -1544,10 +1607,23 @@ class MainWindow(QtWidgets.QMainWindow):
             view_items.append(it)
         if index_changed:
             save_json(self.index_path, self.index)
-        self.list_model.set_items(view_items)
+        page_size = max(1, int(self.settings.get("list_page_size", 200)))
+        total = len(view_items)
+        self._total_pages = max(1, (total + page_size - 1) // page_size)
+        if reset_page:
+            self._current_page = 1
+        if self._current_page > self._total_pages:
+            self._current_page = self._total_pages
+        start = (self._current_page - 1) * page_size
+        end = start + page_size
+        self.list_model.set_items(view_items[start:end])
         if hasattr(self, "result_label"):
-            total = len(self.index.get("snapshots", []))
-            self.result_label.setText(f"Showing {len(view_items)} of {total} snapshots")
+            total_all = len(self.index.get("snapshots", []))
+            showing = len(view_items[start:end])
+            self.result_label.setText(
+                f"Showing {showing} of {len(view_items)} filtered (total {total_all})"
+            )
+        self._update_pagination_controls()
 
     def selected_id(self) -> Optional[str]:
         idx = self.listw.currentIndex()
@@ -1579,6 +1655,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "vscode_workspace": snap.vscode_workspace,
             "tags": snap.tags,
             "pinned": snap.pinned,
+            "archived": snap.archived,
             "search_blob": build_search_blob(asdict(snap)),
             "search_blob_mtime": snap_mtime,
         })
@@ -1606,10 +1683,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.detail_title.setText(snap.get("title", sid))
         tags = snap.get("tags", [])
         pinned = "📌" if bool(snap.get("pinned", False)) else ""
+        archived = "🗄️ " if bool(snap.get("archived", False)) else ""
         ws = snap.get("vscode_workspace", "")
         ws_line = f"  •  workspace: {ws}" if ws else ""
         tag_line = f"  •  tags: {', '.join(tags)}" if tags else ""
-        self.detail_meta.setText(f"{pinned}{snap.get('created_at','')}  •  {snap.get('root','')}{ws_line}{tag_line}")
+        self.detail_meta.setText(
+            f"{archived}{pinned}{snap.get('created_at','')}  •  {snap.get('root','')}{ws_line}{tag_line}"
+        )
 
         todos = snap.get("todos", [])
         recent = snap.get("recent_files", [])
@@ -1679,6 +1759,7 @@ class MainWindow(QtWidgets.QMainWindow):
             todos=todos[:3],
             tags=tags,
             pinned=False,
+            archived=False,
             recent_files=recent_files,
             processes=list_processes_filtered() if capture_processes else [],
             running_apps=list_running_apps() if capture_running_apps else [],
@@ -1686,18 +1767,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_snapshot(snap)
         if capture_recent and background_recent:
             self._start_recent_files_scan(sid, root_path)
-        self.refresh_list()
+        self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))
         self.statusBar().showMessage(f"Saved snapshot: {sid}", 3500)
 
-    def _update_snapshot_meta(self, sid: str, *, pinned: Optional[bool] = None, tags: Optional[List[str]] = None) -> None:
+    def _update_snapshot_meta(
+        self,
+        sid: str,
+        *,
+        pinned: Optional[bool] = None,
+        archived: Optional[bool] = None,
+        tags: Optional[List[str]] = None,
+    ) -> None:
         """Update snapshot file + index with given metadata."""
         snap = self.load_snapshot(sid)
         if not snap:
             return
         if pinned is not None:
             snap["pinned"] = bool(pinned)
+        if archived is not None:
+            snap["archived"] = bool(archived)
         if tags is not None:
             snap["tags"] = tags
         # write snapshot file
@@ -1708,6 +1798,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if it.get("id") == sid:
                 if pinned is not None:
                     it["pinned"] = bool(pinned)
+                if archived is not None:
+                    it["archived"] = bool(archived)
                 if tags is not None:
                     it["tags"] = tags
                 break
@@ -1722,8 +1814,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         new_state = not bool(snap.get("pinned", False))
         self._update_snapshot_meta(sid, pinned=new_state)
-        self.refresh_list()
+        self.refresh_list(reset_page=False)
         self.statusBar().showMessage("Pinned." if new_state else "Unpinned.", 2000)
+
+    def toggle_archive(self) -> None:
+        sid = self.selected_id()
+        if not sid:
+            return
+        snap = self.load_snapshot(sid)
+        if not snap:
+            return
+        new_state = not bool(snap.get("archived", False))
+        self._update_snapshot_meta(sid, archived=new_state)
+        self._reset_pagination_and_refresh()
+        self.statusBar().showMessage("Archived." if new_state else "Unarchived.", 2000)
 
     def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> None:
         """Apply settings immediately (UI + hotkey)."""
@@ -1738,7 +1842,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Refresh tag filter
         self._build_tag_menu()
-        self.refresh_list()
+        self._reset_pagination_and_refresh()
 
         # Update labels
         if hasattr(self, "btn_quick"):
@@ -1801,7 +1905,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     "title": snap.get("title", ""),
                     "created_at": snap.get("created_at", ""),
                     "root": snap.get("root", ""),
+                    "vscode_workspace": snap.get("vscode_workspace", ""),
                     "pinned": bool(snap.get("pinned", False)),
+                    "archived": bool(snap.get("archived", False)),
                     "tags": snap.get("tags", []),
                 }
 
@@ -1846,7 +1952,7 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception as e:
                 log_exc("save index after import", e)
 
-            self.refresh_list()
+            self._reset_pagination_and_refresh()
 
         # Apply settings (always)
         self.apply_settings(payload.get("settings", {}), save=True)
@@ -2064,7 +2170,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
         save_json(self.index_path, self.index)
-        self.refresh_list()
+        self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))
         else:

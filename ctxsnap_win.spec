@@ -11,7 +11,7 @@ a = Analysis(
     ['ctxsnap_win.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('assets/icon.ico', 'assets')],
+    datas=[('assets/icon.ico', 'assets'), ('README.md', '.'), ('README.en.md', '.')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
