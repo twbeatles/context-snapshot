@@ -22,7 +22,7 @@ CtxSnap is a PySide6-based **work context snapshot** tool. It captures the curre
 - **Recent file scan controls**: exclude folders, scan limits, background collection
 - **Restore checklist/history**: post-restore TODO checklist + `restore_history.json` log
 - **Auto snapshots**: scheduled interval or Git-change triggers
-- **Large snapshot lists**: virtualized list rendering for smoother scrolling
+- **Large snapshot lists**: virtualized list rendering + pagination/archiving
 - **In-app onboarding guide**: quick usage tips on first launch (Help → Onboarding, re-openable from tray)
 
 ## What gets stored in a snapshot
@@ -37,10 +37,11 @@ Snapshots are saved as JSON and include:
 
 ## UI overview
 - **Main view**
-  - Left: search/tag/pin filters + snapshot list
+  - Left: search/tag/pin/archive filters + snapshot list with pagination
   - Right: details (notes, TODOs, processes, recent files)
 - **Settings tab**
   - General: recent files count
+  - General: snapshot list page size
   - Restore: restore actions (folders/terminal/VSCode) + default preview behavior
   - Hotkey: hotkey setting
   - Tags: add/remove tags
@@ -83,7 +84,7 @@ Result: `CtxSnap_Setup.exe` (output folder depends on Inno Setup settings)
 ## Additional feature ideas
 Below are candidates for improving real-world usability. You can prioritize based on your needs.
 
-### 0) Performance & scaling (not yet implemented)
+### 0) Performance & scaling (implemented)
 - Pagination/archiving for very large snapshot sets
 
 ### 1) Team collaboration (not yet implemented)

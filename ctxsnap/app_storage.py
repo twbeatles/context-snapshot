@@ -24,6 +24,7 @@ class Snapshot:
     todos: List[str]
     tags: List[str]
     pinned: bool
+    archived: bool
     recent_files: List[str]
     processes: List[Dict[str, Any]]
     running_apps: List[Dict[str, Any]]
@@ -60,6 +61,7 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                     "recent_files_scan_limit": 20000,
                     "recent_files_scan_seconds": 2.0,
                     "recent_files_background": False,
+                    "list_page_size": 200,
                     "auto_snapshot_minutes": 0,
                     "auto_snapshot_on_git_change": False,
                     "restore": {
@@ -112,6 +114,7 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("recent_files_scan_limit", 20000)
     settings.setdefault("recent_files_scan_seconds", 2.0)
     settings.setdefault("recent_files_background", False)
+    settings.setdefault("list_page_size", 200)
     settings.setdefault("auto_snapshot_minutes", 0)
     settings.setdefault("auto_snapshot_on_git_change", False)
     settings.setdefault(
@@ -211,6 +214,7 @@ def migrate_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     snap.setdefault("vscode_workspace", "")
     snap.setdefault("tags", [])
     snap.setdefault("pinned", False)
+    snap.setdefault("archived", False)
     snap.setdefault("running_apps", [])
     return snap
 
