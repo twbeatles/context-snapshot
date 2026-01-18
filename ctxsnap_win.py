@@ -113,6 +113,7 @@ class RecentFilesWorker(QtCore.QObject):
             )
             self.finished.emit(self.sid, files)
         except Exception as exc:
+            LOGGER.exception("Recent files scan failed for %s", self.sid)
             self.failed.emit(self.sid, str(exc))
 
 
@@ -1586,6 +1587,13 @@ class OnboardingDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    def _build_index_search_base(self, entry: Dict[str, Any]) -> str:
+        title = str(entry.get("title", "") or "").lower()
+        root = str(entry.get("root", "") or "").lower()
+        tags = entry.get("tags", []) or []
+        tag_blob = " ".join(str(tag).lower() for tag in tags)
+        return f"{title} {root} {tag_blob}".strip()
+
     def hotkey_label(self) -> str:
         hk = self.settings.get("hotkey", {})
         parts = []
@@ -1673,6 +1681,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.index = load_json(self.index_path)
         self.settings = migrate_settings(load_json(self.settings_path))
         save_json(self.settings_path, self.settings)
+        self._snapshot_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
         # Menus early (uses settings)
         self._build_menus()
@@ -1692,6 +1701,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if "vscode_workspace" not in it:
                 it["vscode_workspace"] = ""
                 changed = True
+            if "search_base" not in it:
+                it["search_base"] = self._build_index_search_base(it)
+                changed = True
         if changed:
             save_json(self.index_path, self.index)
 
@@ -1701,10 +1713,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
 
         self.search = QtWidgets.QLineEdit()
-        self.search.setPlaceholderText("Search snapshots (title/root/note/todo/files/apps)...")
+        self.search.setPlaceholderText("Search snapshots (title, root, tags, notes, todos, files, apps)…")
+        self.search.setToolTip("Type to filter by title, root, tags, notes, TODOs, recent files, or apps.")
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
         self.search_btn_clear = QtWidgets.QToolButton()
-        self.search_btn_clear.setText("Clear")
+        self.search_btn_clear.setText("✕")
         self.search_btn_clear.setToolTip("Clear search")
         self.search_btn_clear.clicked.connect(self._clear_search)
 
@@ -1716,16 +1729,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.days_filter = QtWidgets.QComboBox()
         self.days_filter.addItems(["All time", "Last 1 day", "Last 3 days", "Last 7 days", "Last 30 days"])
+        self.days_filter.setToolTip("Filter snapshots by age")
         self.days_filter.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.sort_combo = QtWidgets.QComboBox()
         self.sort_combo.addItems(["Newest", "Oldest", "Pinned first", "Title"])
+        self.sort_combo.setToolTip("Sort snapshots")
         self.sort_combo.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.pinned_only = QtWidgets.QCheckBox("Pinned only")
+        self.pinned_only.setToolTip("Show only pinned snapshots")
         self.pinned_only.stateChanged.connect(self._reset_pagination_and_refresh)
 
         self.show_archived = QtWidgets.QCheckBox("Show archived")
+        self.show_archived.setToolTip("Include archived snapshots")
         self.show_archived.stateChanged.connect(self._reset_pagination_and_refresh)
 
         self.listw = QtWidgets.QListView()
@@ -1733,6 +1750,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.listw.setWordWrap(True)
         self.listw.setTextElideMode(QtCore.Qt.ElideRight)
+        self.listw.setAlternatingRowColors(True)
+        self.listw.setSpacing(4)
         self.list_model = SnapshotListModel(self)
         self.listw.setModel(self.list_model)
         self.listw.selectionModel().currentChanged.connect(self.on_select)
@@ -1759,6 +1778,19 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_open_vscode = QtWidgets.QPushButton("Open in VSCode")
         btn_delete = QtWidgets.QPushButton("Delete")
 
+        btn_new.setToolTip("Create a new snapshot")
+        self.btn_quick.setToolTip("Capture a snapshot quickly")
+        btn_settings.setToolTip("Open settings")
+        btn_restore.setToolTip("Restore the selected snapshot")
+        btn_edit.setToolTip("Edit the selected snapshot")
+        btn_pin.setToolTip("Pin or unpin the selected snapshot")
+        btn_archive.setToolTip("Archive or unarchive the selected snapshot")
+        btn_compare.setToolTip("Compare two snapshots")
+        btn_restore_last.setToolTip("Restore the most recent snapshot")
+        btn_open_root.setToolTip("Open the root folder for the selected snapshot")
+        btn_open_vscode.setToolTip("Open the snapshot in VSCode")
+        btn_delete.setToolTip("Delete the selected snapshot")
+
         btn_new.clicked.connect(self.new_snapshot)
         self.btn_quick.clicked.connect(self.quick_snapshot)
         btn_settings.clicked.connect(self.open_settings)
@@ -1777,8 +1809,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
+        filters_label = QtWidgets.QLabel("Filters")
+        filters_label.setObjectName("HintLabel")
         search_row.addWidget(self.search, 1)
         search_row.addWidget(self.search_btn_clear)
+        search_row.addWidget(filters_label)
         search_row.addWidget(self.tag_filter_btn)
         search_row.addWidget(self.days_filter)
         search_row.addWidget(self.sort_combo)
@@ -1832,9 +1867,9 @@ class MainWindow(QtWidgets.QMainWindow):
         right.addLayout(right_btns2)
 
         root_layout = QtWidgets.QHBoxLayout(central)
-        left_wrap = QtWidgets.QWidget()
+        left_wrap = QtWidgets.QGroupBox("Snapshots")
         left_wrap.setLayout(left)
-        right_wrap = QtWidgets.QWidget()
+        right_wrap = QtWidgets.QGroupBox("Details")
         right_wrap.setLayout(right)
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         splitter.addWidget(left_wrap)
@@ -2015,7 +2050,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 snap = self.load_snapshot(sid)
                 if snap:
                     snap["archived"] = True
-                    save_snapshot_file(self.snap_path(sid), snap)
+                    snap_path = self.snap_path(sid)
+                    save_snapshot_file(snap_path, snap)
+                    snap_mtime = snapshot_mtime(snap_path)
+                    self._update_snapshot_cache(sid, snap, snap_mtime)
             updated = True
         if updated:
             save_json(self.index_path, self.index)
@@ -2067,17 +2105,20 @@ class MainWindow(QtWidgets.QMainWindow):
         snap_path = self.snap_path(sid)
         save_snapshot_file(snap_path, snap)
         snap_mtime = snapshot_mtime(snap_path)
+        self._update_snapshot_cache(sid, snap, snap_mtime)
         for it in self.index.get("snapshots", []):
             if it.get("id") == sid:
                 it["search_blob"] = build_search_blob(snap)
                 it["search_blob_mtime"] = snap_mtime
+                it["search_base"] = self._build_index_search_base(it)
                 break
         save_json(self.index_path, self.index)
         self.refresh_list(reset_page=False)
         self.statusBar().showMessage("Recent files updated in background.", 2500)
 
     def _on_recent_files_failed(self, sid: str, error: str) -> None:
-        log_exc(f"recent files background scan ({sid})", Exception(error))
+        LOGGER.error("Recent files background scan failed for %s: %s", sid, error)
+        self.statusBar().showMessage("Recent files update failed. Check logs for details.", 3500)
 
     def _build_tag_menu(self) -> None:
         menu = QtWidgets.QMenu(self)
@@ -2168,20 +2209,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             if bool(it.get("archived", False)) and not show_archived:
                 continue
-            base_hay = f"{it.get('title','')} {it.get('root','')} {' '.join(tags)}".lower()
+            base_hay = str(it.get("search_base") or "")
+            if not base_hay:
+                base_hay = self._build_index_search_base(it)
+                it["search_base"] = base_hay
+                index_changed = True
             if query and query not in base_hay:
-                search_blob = (it.get("search_blob") or "").lower()
-                snap_mtime = 0.0
-                if it.get("id"):
-                    snap_mtime = snapshot_mtime(self.snap_path(it["id"]))
-                if it.get("search_blob_mtime", 0.0) < snap_mtime:
-                    search_blob = ""
+                search_blob = str(it.get("search_blob") or "").lower()
                 if not search_blob and it.get("id"):
                     snap = self.load_snapshot(it.get("id"))
                     if snap:
                         search_blob = build_search_blob(snap)
                         it["search_blob"] = search_blob
-                        it["search_blob_mtime"] = snap_mtime or snapshot_mtime(self.snap_path(it["id"]))
+                        snap_mtime = self._snapshot_cache.get(it.get("id"), (0.0, {}))[0]
+                        it["search_blob_mtime"] = snap_mtime
                         index_changed = True
                 if not search_blob or query not in search_blob:
                     continue
@@ -2227,16 +2268,31 @@ class MainWindow(QtWidgets.QMainWindow):
     def snap_path(self, sid: str) -> Path:
         return self.snaps_dir / f"{sid}.json"
 
+    def _update_snapshot_cache(self, sid: str, snap: Dict[str, Any], mtime: Optional[float] = None) -> None:
+        snap_mtime = mtime if mtime is not None else snapshot_mtime(self.snap_path(sid))
+        self._snapshot_cache[sid] = (snap_mtime, snap)
+
+    def _invalidate_snapshot_cache(self, sid: str) -> None:
+        self._snapshot_cache.pop(sid, None)
+
     def load_snapshot(self, sid: str) -> Optional[Dict[str, Any]]:
         p = self.snap_path(sid)
         if not p.exists():
+            self._invalidate_snapshot_cache(sid)
             return None
-        return migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
+        snap_mtime = snapshot_mtime(p)
+        cached = self._snapshot_cache.get(sid)
+        if cached and cached[0] == snap_mtime:
+            return cached[1]
+        snap = migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
+        self._snapshot_cache[sid] = (snap_mtime, snap)
+        return snap
 
     def save_snapshot(self, snap: Snapshot) -> None:
         snap_path = self.snap_path(snap.id)
         save_snapshot_file(snap_path, asdict(snap))
         snap_mtime = snapshot_mtime(snap_path)
+        self._update_snapshot_cache(snap.id, asdict(snap), snap_mtime)
         self.index["snapshots"].insert(0, {
             "id": snap.id,
             "title": snap.title,
@@ -2248,6 +2304,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "archived": snap.archived,
             "search_blob": build_search_blob(asdict(snap)),
             "search_blob_mtime": snap_mtime,
+            "search_base": self._build_index_search_base({
+                "title": snap.title,
+                "root": snap.root,
+                "tags": snap.tags,
+            }),
         })
         save_json(self.index_path, self.index)
         self.settings["default_root"] = snap.root
@@ -2361,6 +2422,7 @@ class MainWindow(QtWidgets.QMainWindow):
         snap_path = self.snap_path(sid)
         save_snapshot_file(snap_path, snap)
         snap_mtime = snapshot_mtime(snap_path)
+        self._update_snapshot_cache(sid, snap, snap_mtime)
         
         # Update index entry
         for it in self.index.get("snapshots", []):
@@ -2371,6 +2433,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 it["tags"] = tags
                 it["search_blob"] = build_search_blob(snap)
                 it["search_blob_mtime"] = snap_mtime
+                it["search_base"] = self._build_index_search_base(it)
                 break
         save_json(self.index_path, self.index)
         
@@ -2493,7 +2556,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if tags is not None:
             snap["tags"] = tags
         # write snapshot file
-        save_snapshot_file(self.snap_path(sid), snap)
+        snap_path = self.snap_path(sid)
+        save_snapshot_file(snap_path, snap)
+        snap_mtime = snapshot_mtime(snap_path)
+        self._update_snapshot_cache(sid, snap, snap_mtime)
 
         # update index
         for it in self.index.get("snapshots", []):
@@ -2504,6 +2570,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     it["archived"] = bool(archived)
                 if tags is not None:
                     it["tags"] = tags
+                    it["search_base"] = self._build_index_search_base(it)
                 break
         save_json(self.index_path, self.index)
 
@@ -2600,10 +2667,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception as e:
                     log_exc("wipe snapshots", e)
                 self.index = {"snapshots": []}
+                self._snapshot_cache.clear()
 
             existing_ids = {it.get("id") for it in self.index.get("snapshots", []) if it.get("id")}
 
-            def index_entry_from_snap(snap: Dict[str, Any]) -> Dict[str, Any]:
+            def index_entry_from_snap(snap: Dict[str, Any], snap_mtime: float) -> Dict[str, Any]:
                 return {
                     "id": snap.get("id"),
                     "title": snap.get("title", ""),
@@ -2613,6 +2681,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     "pinned": bool(snap.get("pinned", False)),
                     "archived": bool(snap.get("archived", False)),
                     "tags": snap.get("tags", []),
+                    "search_blob": build_search_blob(snap),
+                    "search_blob_mtime": snap_mtime,
+                    "search_base": self._build_index_search_base(snap),
                 }
 
             for snap in imported_snaps:
@@ -2622,23 +2693,31 @@ class MainWindow(QtWidgets.QMainWindow):
                 if strategy == "merge" and sid in existing_ids:
                     continue
                 try:
-                    save_snapshot_file(self.snap_path(sid), migrate_snapshot(snap))
+                    migrated = migrate_snapshot(snap)
+                    snap_path = self.snap_path(sid)
+                    save_snapshot_file(snap_path, migrated)
+                    snap_mtime = snapshot_mtime(snap_path)
+                    self._update_snapshot_cache(sid, migrated, snap_mtime)
                 except Exception as e:
                     log_exc("write imported snapshot", e)
                     continue
                 if sid not in existing_ids:
-                    self.index.setdefault("snapshots", []).append(index_entry_from_snap(snap))
+                    self.index.setdefault("snapshots", []).append(index_entry_from_snap(migrated, snap_mtime))
                     existing_ids.add(sid)
                 elif strategy == "overwrite":
                     # update index entry meta
                     for it in self.index.get("snapshots", []):
                         if it.get("id") == sid:
-                            it.update(index_entry_from_snap(snap))
+                            it.update(index_entry_from_snap(migrated, snap_mtime))
                             break
 
             # If imported index exists and overwrite/replace: prefer it
             if imported_index and strategy in ("overwrite", "replace"):
                 self.index = imported_index
+                self._snapshot_cache.clear()
+                for it in self.index.get("snapshots", []):
+                    if "search_base" not in it:
+                        it["search_base"] = self._build_index_search_base(it)
 
             # Dedup index by id
             seen = set()
@@ -2896,6 +2975,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 p.unlink()
             except Exception:
                 pass
+        self._invalidate_snapshot_cache(sid)
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
         save_json(self.index_path, self.index)
         self._reset_pagination_and_refresh()
