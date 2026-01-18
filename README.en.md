@@ -18,11 +18,14 @@ CtxSnap is a PySide6-based **work context snapshot** tool. It captures the curre
 - Save/restore VSCode **.code-workspace** files
 - Auto-suggest titles for Git repos (branch + latest commit subject)
 - **Tags / Pin**: tags (work/personal/real estate/settlement, etc.), pinning, and filtering
-- **Search/Filter**: search notes/TODOs/recent files/apps + multi-tag/last N days/sort options
-- **Recent file scan controls**: exclude folders, scan limits, background collection
-- **Restore checklist/history**: post-restore TODO checklist + `restore_history.json` log
+- **Search/Filter**: search notes/TODOs/recent files/processes/apps + multi-tag/last N days/sort options
+- **Recent file scan controls**: include/exclude patterns, scan limits, background collection
+- **Restore checklist/history**: post-restore TODO checklist + history viewer
 - **Auto snapshots**: scheduled interval or Git-change triggers
-- **Large snapshot lists**: virtualized list rendering for smoother scrolling
+- **Large snapshot lists**: virtualized list rendering + pagination/archiving
+- **Templates**: save/apply common TODO/tag/note templates
+- **Snapshot compare**: compare two snapshots side-by-side
+- **Auto backup/archive policy**: scheduled backups and automatic archiving of old snapshots
 - **In-app onboarding guide**: quick usage tips on first launch (Help → Onboarding, re-openable from tray)
 
 ## What gets stored in a snapshot
@@ -37,13 +40,15 @@ Snapshots are saved as JSON and include:
 
 ## UI overview
 - **Main view**
-  - Left: search/tag/pin filters + snapshot list
+  - Left: search/tag/pin/archive filters + snapshot list with pagination
   - Right: details (notes, TODOs, processes, recent files)
 - **Settings tab**
-  - General: recent files count
+  - General: recent files count/scan patterns/process keywords/archive policy/auto backup
+  - General: snapshot list page size
   - Restore: restore actions (folders/terminal/VSCode) + default preview behavior
   - Hotkey: hotkey setting
   - Tags: add/remove tags
+  - Templates: add/remove templates
   - Backup: backup/restore/reset
 
 ## Storage
@@ -83,7 +88,7 @@ Result: `CtxSnap_Setup.exe` (output folder depends on Inno Setup settings)
 ## Additional feature ideas
 Below are candidates for improving real-world usability. You can prioritize based on your needs.
 
-### 0) Performance & scaling (not yet implemented)
+### 0) Performance & scaling (implemented)
 - Pagination/archiving for very large snapshot sets
 
 ### 1) Team collaboration (not yet implemented)

@@ -11,13 +11,10 @@ from typing import Dict, List, Optional, Tuple
 import psutil
 from PySide6 import QtWidgets
 
+from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS
+
 APP_NAME = "ctxsnap"
 LOGGER = logging.getLogger(APP_NAME)
-
-DEFAULT_PROC_KEYWORDS = [
-    "code", "pycharm", "idea", "chrome", "msedge", "firefox", "wt", "terminal",
-    "powershell", "cmd", "python", "node", "docker", "postman", "slack", "notion"
-]
 
 
 def recent_files_under(
@@ -25,12 +22,16 @@ def recent_files_under(
     limit: int = 30,
     *,
     exclude_dirs: Optional[List[str]] = None,
+    include_patterns: Optional[List[str]] = None,
+    exclude_patterns: Optional[List[str]] = None,
     scan_limit: int = 20000,
     scan_seconds: float = 2.0,
 ) -> List[str]:
     if not root.exists():
         return []
     exclude = {d.lower() for d in (exclude_dirs or [])}
+    include_globs = [p.lower() for p in (include_patterns or []) if p.strip()]
+    exclude_globs = [p.lower() for p in (exclude_patterns or []) if p.strip()]
     files: List[Tuple[float, Path]] = []
     start = time.monotonic()
     scanned = 0
@@ -42,6 +43,10 @@ def recent_files_under(
             if any(part.lower() in exclude for part in p.parts):
                 continue
             if exclude and any(fnmatch.fnmatch(p.as_posix().lower(), f"*{pattern.lower()}*") for pattern in exclude):
+                continue
+            if exclude_globs and any(fnmatch.fnmatch(p.as_posix().lower(), pat) for pat in exclude_globs):
+                continue
+            if include_globs and not any(fnmatch.fnmatch(p.as_posix().lower(), pat) for pat in include_globs):
                 continue
             if any(part.startswith(".") for part in p.parts):
                 continue
@@ -70,7 +75,7 @@ def recent_files_under(
 
 
 def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Dict[str, str]]:
-    kws = keywords or DEFAULT_PROC_KEYWORDS
+    kws = keywords or DEFAULT_PROCESS_KEYWORDS
     out: List[Dict[str, str]] = []
     for proc in psutil.process_iter(attrs=["pid", "name", "exe", "cmdline"]):
         try:
@@ -199,6 +204,8 @@ def build_search_blob(snap: Dict[str, object]) -> str:
     parts.append(str(snap.get("note", "") or ""))
     parts.extend([str(p) for p in snap.get("todos", [])])
     parts.extend([str(p) for p in snap.get("recent_files", [])])
+    parts.extend([str(p.get("name", "")) for p in snap.get("processes", [])])
+    parts.extend([str(p.get("exe", "")) for p in snap.get("processes", [])])
     parts.extend([str(p.get("name", "")) for p in snap.get("running_apps", [])])
     return " ".join(p for p in parts if p).lower()
 
