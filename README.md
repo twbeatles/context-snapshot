@@ -1,5 +1,7 @@
 # CtxSnap (Windows)
 
+> English version: [README.en.md](README.en.md)
+
 PySide6 기반 **작업 컨텍스트 스냅샷** 도구입니다. 현재 작업 맥락(폴더, 메모, TODO, 최근 파일, 실행 중 프로세스 등)을 한 번에 저장하고, 나중에 빠르게 복원할 수 있도록 돕습니다.
 
 ## 왜 필요한가요?
