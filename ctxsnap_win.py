@@ -107,6 +107,56 @@ class RecentFilesWorker(QtCore.QObject):
             self.failed.emit(self.sid, str(exc))
 
 
+class SnapshotListModel(QtCore.QAbstractListModel):
+    def __init__(self, parent: Optional[QtCore.QObject] = None) -> None:
+        super().__init__(parent)
+        self._items: List[Dict[str, Any]] = []
+        self._display_cache: Dict[str, str] = {}
+
+    def set_items(self, items: List[Dict[str, Any]]) -> None:
+        self.beginResetModel()
+        self._items = items
+        self._display_cache.clear()
+        self.endResetModel()
+
+    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+        if parent.isValid():
+            return 0
+        return len(self._items)
+
+    def id_for_index(self, index: QtCore.QModelIndex) -> Optional[str]:
+        if not index.isValid():
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._items):
+            return None
+        return str(self._items[row].get("id") or "")
+
+    def data(self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole) -> Optional[str]:
+        if not index.isValid():
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._items):
+            return None
+        item = self._items[row]
+        sid = str(item.get("id") or "")
+        if role == QtCore.Qt.DisplayRole:
+            cached = self._display_cache.get(sid)
+            if cached is not None:
+                return cached
+            title = item.get("title", "")
+            root = item.get("root", "")
+            created = item.get("created_at", "")
+            tags = item.get("tags", []) or []
+            pin = "📌 " if bool(item.get("pinned", False)) else ""
+            tag_badge = f"[{', '.join(tags)}] " if tags else ""
+            text = f"{pin}{tag_badge}{title}\n{root}   •   {created}"
+            self._display_cache[sid] = text
+            return text
+        if role == QtCore.Qt.UserRole:
+            return sid
+        return None
+
 def git_title_suggestion(root: Path) -> Optional[str]:
     git = shutil.which("git")
     if not git:
@@ -200,14 +250,14 @@ def set_pretty_style(app: QtWidgets.QApplication) -> None:
 
 APP_QSS = """
 QMainWindow { background: #121214; }
-QLineEdit, QTextEdit, QListWidget {
+QLineEdit, QTextEdit, QListWidget, QListView {
     background: #18181a;
     border: 1px solid #2a2a2f;
     border-radius: 10px;
     padding: 8px;
 }
-QListWidget::item { padding: 10px; border-radius: 10px; }
-QListWidget::item:selected { background: rgba(90,120,255,0.25); }
+QListWidget::item, QListView::item { padding: 10px; border-radius: 10px; }
+QListWidget::item:selected, QListView::item:selected { background: rgba(90,120,255,0.25); }
 QPushButton {
     background: #222226;
     border: 1px solid #2a2a2f;
@@ -1199,6 +1249,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Search snapshots (title/root/note/todo/files/apps)...")
         self.search.textChanged.connect(self.refresh_list)
+        self.search_btn_clear = QtWidgets.QToolButton()
+        self.search_btn_clear.setText("Clear")
+        self.search_btn_clear.setToolTip("Clear search")
+        self.search_btn_clear.clicked.connect(self.search.clear)
 
         self.selected_tags: set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
@@ -1217,8 +1271,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pinned_only = QtWidgets.QCheckBox("Pinned only")
         self.pinned_only.stateChanged.connect(self.refresh_list)
 
-        self.listw = QtWidgets.QListWidget()
-        self.listw.currentRowChanged.connect(self.on_select)
+        self.listw = QtWidgets.QListView()
+        self.listw.setUniformItemSizes(False)
+        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.listw.setWordWrap(True)
+        self.listw.setTextElideMode(QtCore.Qt.ElideRight)
+        self.list_model = SnapshotListModel(self)
+        self.listw.setModel(self.list_model)
+        self.listw.selectionModel().currentChanged.connect(self.on_select)
 
         self.detail_title = QtWidgets.QLabel("No snapshot selected")
         self.detail_title.setObjectName("TitleLabel")
@@ -1227,6 +1287,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.detail = QtWidgets.QTextEdit()
         self.detail.setReadOnly(True)
+        self.detail.setPlaceholderText("Select a snapshot to see details.")
 
         btn_new = QtWidgets.QPushButton("New Snapshot")
         self.btn_quick = QtWidgets.QPushButton(f"Quick Snapshot ({self.hotkey_label()})")
@@ -1251,12 +1312,16 @@ class MainWindow(QtWidgets.QMainWindow):
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
         search_row.addWidget(self.search, 1)
+        search_row.addWidget(self.search_btn_clear)
         search_row.addWidget(self.tag_filter_btn)
         search_row.addWidget(self.days_filter)
         search_row.addWidget(self.sort_combo)
         search_row.addWidget(self.pinned_only)
         left.addLayout(search_row)
         left.addWidget(self.listw, 1)
+        self.result_label = QtWidgets.QLabel("")
+        self.result_label.setObjectName("HintLabel")
+        left.addWidget(self.result_label)
         left_btns = QtWidgets.QHBoxLayout()
         left_btns.addWidget(btn_new)
         left_btns.addWidget(self.btn_quick)
@@ -1287,12 +1352,17 @@ class MainWindow(QtWidgets.QMainWindow):
         left_wrap.setLayout(left)
         right_wrap = QtWidgets.QWidget()
         right_wrap.setLayout(right)
-        root_layout.addWidget(left_wrap, 0)
-        root_layout.addWidget(right_wrap, 1)
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter.addWidget(left_wrap)
+        splitter.addWidget(right_wrap)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 660])
+        root_layout.addWidget(splitter, 1)
 
         self.refresh_list()
-        if self.listw.count() > 0:
-            self.listw.setCurrentRow(0)
+        if self.list_model.rowCount() > 0:
+            self.listw.setCurrentIndex(self.list_model.index(0, 0))
 
         self.statusBar().showMessage(f"Storage: {app_dir()}")
 
@@ -1414,9 +1484,9 @@ class MainWindow(QtWidgets.QMainWindow):
         query = self.search.text().strip().lower()
         pinned_only = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
 
-        self.listw.clear()
         items = list(self.index.get("snapshots", []))
         index_changed = False
+        view_items: List[Dict[str, Any]] = []
 
         sort_mode = self.sort_combo.currentText() if hasattr(self, "sort_combo") else "Newest"
         if sort_mode == "Pinned first":
@@ -1471,22 +1541,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
 
-            title = it.get("title", "")
-            root = it.get("root", "")
-            created = it.get("created_at", "")
-            pin = "📌 " if bool(it.get("pinned", False)) else ""
-            tag_badge = f"[{', '.join(tags)}] " if tags else ""
-            item = QtWidgets.QListWidgetItem(f"{pin}{tag_badge}{title}\n{root}   •   {created}")
-            item.setData(QtCore.Qt.UserRole, it.get("id"))
-            self.listw.addItem(item)
+            view_items.append(it)
         if index_changed:
             save_json(self.index_path, self.index)
+        self.list_model.set_items(view_items)
+        if hasattr(self, "result_label"):
+            total = len(self.index.get("snapshots", []))
+            self.result_label.setText(f"Showing {len(view_items)} of {total} snapshots")
 
     def selected_id(self) -> Optional[str]:
-        it = self.listw.currentItem()
-        if not it:
+        idx = self.listw.currentIndex()
+        if not idx.isValid():
             return None
-        return it.data(QtCore.Qt.UserRole)
+        sid = self.list_model.id_for_index(idx)
+        if not sid:
+            return None
+        return sid
 
     def snap_path(self, sid: str) -> Path:
         return self.snaps_dir / f"{sid}.json"
@@ -1517,11 +1587,11 @@ class MainWindow(QtWidgets.QMainWindow):
         save_json(self.settings_path, self.settings)
 
     # ----- selection rendering -----
-    def on_select(self, row: int) -> None:
-        if row < 0:
+    def on_select(self, current: QtCore.QModelIndex, previous: QtCore.QModelIndex) -> None:
+        if not current.isValid():
             self.detail_title.setText("No snapshot selected")
             self.detail_meta.setText("")
-            self.detail.setText("")
+            self.detail.setText("왼쪽에서 스냅샷을 선택하면 상세 정보가 여기에 표시됩니다.")
             return
         sid = self.selected_id()
         if not sid:
@@ -1617,7 +1687,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if capture_recent and background_recent:
             self._start_recent_files_scan(sid, root_path)
         self.refresh_list()
-        self.listw.setCurrentRow(0)
+        if self.list_model.rowCount() > 0:
+            self.listw.setCurrentIndex(self.list_model.index(0, 0))
         self.statusBar().showMessage(f"Saved snapshot: {sid}", 3500)
 
     def _update_snapshot_meta(self, sid: str, *, pinned: Optional[bool] = None, tags: Optional[List[str]] = None) -> None:
@@ -1994,10 +2065,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
         save_json(self.index_path, self.index)
         self.refresh_list()
-        if self.listw.count() > 0:
-            self.listw.setCurrentRow(0)
+        if self.list_model.rowCount() > 0:
+            self.listw.setCurrentIndex(self.list_model.index(0, 0))
         else:
-            self.on_select(-1)
+            self.on_select(QtCore.QModelIndex(), QtCore.QModelIndex())
         self.statusBar().showMessage("Deleted.", 2000)
 
 
