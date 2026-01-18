@@ -11,7 +11,7 @@ import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -30,6 +30,7 @@ from ctxsnap.app_storage import (
     migrate_snapshot,
     now_iso,
     save_json,
+    save_snapshot_file,
 )
 from ctxsnap.constants import DEFAULT_TAGS
 from ctxsnap.restore import open_folder, open_terminal_at, open_vscode_at, resolve_vscode_target
@@ -40,6 +41,7 @@ from ctxsnap.utils import (
     recent_files_under,
     restore_running_apps,
     snapshot_mtime,
+    safe_parse_datetime,
 )
 
 APP_NAME = "ctxsnap"
@@ -175,7 +177,8 @@ def git_title_suggestion(root: Path) -> Optional[str]:
         branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
         subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True).strip()
         return f"{root.name} [{branch}] - {subj}"
-    except Exception:
+    except Exception as e:
+        LOGGER.debug("Git title suggestion failed: %s", e)
         return None
 
 
@@ -189,7 +192,8 @@ def git_state(root: Path) -> Optional[Tuple[str, str]]:
         branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
         sha = subprocess.check_output([git, "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
         return branch, sha
-    except Exception:
+    except Exception as e:
+        LOGGER.debug("Git state check failed: %s", e)
         return None
 
 
@@ -313,6 +317,10 @@ class SnapshotDialog(QtWidgets.QDialog):
         self.root_edit = QtWidgets.QLineEdit(default_root)
         self.title_edit = QtWidgets.QLineEdit("")
         self.note_edit = QtWidgets.QTextEdit("")
+        
+        # Initialize import state to prevent AttributeError
+        self._imported_payload: Optional[Dict[str, Any]] = None
+        self._import_apply_now: bool = False
 
         # Optional VSCode workspace (.code-workspace)
         self.workspace_edit = QtWidgets.QLineEdit("")
@@ -501,6 +509,57 @@ class SnapshotDialog(QtWidgets.QDialog):
             it.setCheckState(QtCore.Qt.Checked if it.text() in tags else QtCore.Qt.Unchecked)
 
 
+class EditSnapshotDialog(SnapshotDialog):
+    """Dialog for editing an existing snapshot."""
+    
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget,
+        snapshot: Dict[str, Any],
+        available_tags: List[str],
+        templates: List[Dict[str, Any]],
+    ):
+        super().__init__(
+            parent,
+            snapshot.get("root", str(Path.home())),
+            available_tags,
+            templates,
+        )
+        self.setWindowTitle("Edit Snapshot")
+        self._snapshot_id = snapshot.get("id", "")
+        
+        # Populate fields with existing data
+        self.title_edit.setText(snapshot.get("title", ""))
+        self.workspace_edit.setText(snapshot.get("vscode_workspace", ""))
+        self.note_edit.setText(snapshot.get("note", ""))
+        
+        todos = snapshot.get("todos", [])
+        if len(todos) >= 1:
+            self.todo1.setText(todos[0])
+        if len(todos) >= 2:
+            self.todo2.setText(todos[1])
+        if len(todos) >= 3:
+            self.todo3.setText(todos[2])
+        
+        # Check existing tags
+        existing_tags = set(snapshot.get("tags", []))
+        for i in range(self.tags_list.count()):
+            it = self.tags_list.item(i)
+            if it.text() in existing_tags:
+                it.setCheckState(QtCore.Qt.Checked)
+                existing_tags.discard(it.text())
+        
+        # Add any tags that weren't in the available list
+        for tag in existing_tags:
+            it = QtWidgets.QListWidgetItem(tag)
+            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.Checked)
+            self.tags_list.addItem(it)
+    
+    def snapshot_id(self) -> str:
+        return self._snapshot_id
+
+
 class RestorePreviewDialog(QtWidgets.QDialog):
     def __init__(
         self,
@@ -684,12 +743,13 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
 
 
 class CompareDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget, snapshots: List[Dict[str, Any]]) -> None:
+    def __init__(self, parent: QtWidgets.QWidget, snapshots: List[Dict[str, Any]], loader: Callable[[str], Optional[Dict[str, Any]]]) -> None:
         super().__init__(parent)
         self.setWindowTitle("Compare Snapshots")
         self.setModal(True)
         self.setMinimumSize(720, 520)
         self._snaps = snapshots
+        self._loader = loader
 
         title = QtWidgets.QLabel("Compare two snapshots")
         title.setObjectName("TitleLabel")
@@ -748,8 +808,10 @@ class CompareDialog(QtWidgets.QDialog):
         return lines
 
     def _run_compare(self) -> None:
-        left = self._snaps[self.left_combo.currentIndex()]
-        right = self._snaps[self.right_combo.currentIndex()]
+        left_meta = self._snaps[self.left_combo.currentIndex()]
+        right_meta = self._snaps[self.right_combo.currentIndex()]
+        left = self._loader(left_meta.get("id")) or left_meta
+        right = self._loader(right_meta.get("id")) or right_meta
         left_lines = self._serialize(left)
         right_lines = self._serialize(right)
         diff = difflib.unified_diff(
@@ -1688,6 +1750,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_quick = QtWidgets.QPushButton(f"Quick Snapshot ({self.hotkey_label()})")
         btn_settings = QtWidgets.QPushButton("Settings")
         btn_restore = QtWidgets.QPushButton("Restore")
+        btn_edit = QtWidgets.QPushButton("Edit")
         btn_pin = QtWidgets.QPushButton("Pin / Unpin")
         btn_archive = QtWidgets.QPushButton("Archive / Unarchive")
         btn_compare = QtWidgets.QPushButton("Compare")
@@ -1704,9 +1767,13 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_open_root.clicked.connect(self.open_selected_root)
         btn_open_vscode.clicked.connect(self.open_selected_vscode)
         btn_delete.clicked.connect(self.delete_selected)
+        btn_edit.clicked.connect(self.edit_selected)
         btn_pin.clicked.connect(self.toggle_pin)
         btn_archive.clicked.connect(self.toggle_archive)
         btn_compare.clicked.connect(self.open_compare_dialog)
+        
+        # In-app keyboard shortcuts
+        self._setup_shortcuts()
 
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
@@ -1758,6 +1825,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_btns2.addWidget(btn_pin)
         right_btns2.addWidget(btn_archive)
         right_btns2.addWidget(btn_compare)
+        right_btns2.addWidget(btn_edit)
         right_btns2.addWidget(btn_delete)
         right_btns2.addWidget(btn_restore_last)
         right_btns2.addWidget(btn_restore)
@@ -1799,6 +1867,78 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # external hook (set by main) to re-apply hotkey settings
         self.on_settings_applied = None
+        
+        # Flag for clean shutdown
+        self._is_closing = False
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """Clean up resources when closing the window."""
+        self._is_closing = True
+        
+        # Stop all timers
+        self.auto_timer.stop()
+        self.backup_timer.stop()
+        self.git_timer.stop()
+        
+        # Stop all background workers
+        for sid, thread in list(self._recent_workers.items()):
+            try:
+                thread.quit()
+                if not thread.wait(2000):  # Wait up to 2 seconds
+                    LOGGER.warning("Worker thread %s did not stop in time", sid)
+                    thread.terminate()
+                    thread.wait(1000)
+            except Exception as e:
+                LOGGER.exception("Error stopping worker thread %s: %s", sid, e)
+        self._recent_workers.clear()
+        
+        # Accept the close event (minimize to tray handled elsewhere if needed)
+        event.accept()
+
+    def _setup_shortcuts(self) -> None:
+        """Set up in-app keyboard shortcuts."""
+        # Ctrl+N: New Snapshot
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+N"), self
+        ).activated.connect(self.new_snapshot)
+        
+        # Ctrl+E: Edit selected snapshot
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+E"), self
+        ).activated.connect(self.edit_selected)
+        
+        # Delete: Delete selected snapshot
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Delete"), self
+        ).activated.connect(self.delete_selected)
+        
+        # Ctrl+R or Enter: Restore selected snapshot
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+R"), self
+        ).activated.connect(self.restore_selected)
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Return"), self
+        ).activated.connect(self.restore_selected)
+        
+        # Ctrl+F: Focus search bar
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+F"), self
+        ).activated.connect(lambda: self.search.setFocus())
+        
+        # Ctrl+,: Open settings
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+,"), self
+        ).activated.connect(self.open_settings)
+        
+        # Ctrl+P: Toggle pin
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Ctrl+P"), self
+        ).activated.connect(self.toggle_pin)
+        
+        # Escape: Clear search
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Escape"), self
+        ).activated.connect(self._clear_search)
 
     def _auto_snapshot_prompt(self) -> None:
         if int(self.settings.get("auto_snapshot_minutes", 0)) <= 0:
@@ -1830,8 +1970,8 @@ class MainWindow(QtWidgets.QMainWindow):
         last = self.settings.get("auto_backup_last", "")
         if last:
             try:
-                last_dt = datetime.strptime(last, "%Y-%m-%dT%H:%M:%S")
-                if datetime.now() - last_dt < timedelta(hours=hours):
+                last_dt = safe_parse_datetime(last)
+                if last_dt and datetime.now() - last_dt < timedelta(hours=hours):
                     return
             except Exception:
                 pass
@@ -1839,6 +1979,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings["auto_backup_last"] = now_iso()
         save_json(self.settings_path, self.settings)
         self.statusBar().showMessage(f"Auto backup created: {bkp.name}", 3500)
+
+        # Cleanup old backups (keep last 5)
+        try:
+            backups = sorted(app_dir().glob(f"{APP_NAME}_backup_*.json"), key=lambda p: p.stat().st_mtime)
+            while len(backups) > 5:
+                old = backups.pop(0)
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+        except Exception as e:
+            LOGGER.debug("Backup cleanup failed: %s", e)
 
     def _apply_archive_policy(self) -> None:
         days = int(self.settings.get("archive_after_days", 0))
@@ -1852,9 +2004,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             if bool(it.get("archived", False)):
                 continue
-            try:
-                created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
-            except Exception:
+            created_at = safe_parse_datetime(it.get("created_at", ""))
+            if not created_at:
                 continue
             if created_at >= cutoff:
                 continue
@@ -1864,7 +2015,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 snap = self.load_snapshot(sid)
                 if snap:
                     snap["archived"] = True
-                    self.snap_path(sid).write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+                    save_snapshot_file(self.snap_path(sid), snap)
             updated = True
         if updated:
             save_json(self.index_path, self.index)
@@ -1881,6 +2032,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_git_state = state
 
     def _start_recent_files_scan(self, sid: str, root: Path) -> None:
+        if sid in self._recent_workers:
+            return
         worker = RecentFilesWorker(
             sid,
             root,
@@ -1912,7 +2065,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         snap["recent_files"] = files
         snap_path = self.snap_path(sid)
-        snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_snapshot_file(snap_path, snap)
         snap_mtime = snapshot_mtime(snap_path)
         for it in self.index.get("snapshots", []):
             if it.get("id") == sid:
@@ -2037,12 +2190,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
 
             if day_cutoff:
-                try:
-                    created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
-                    if created_at < day_cutoff:
-                        continue
-                except Exception:
-                    pass
+                created_at = safe_parse_datetime(it.get("created_at", ""))
+                if created_at and created_at < day_cutoff:
+                    continue
 
             view_items.append(it)
         if index_changed:
@@ -2085,7 +2235,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def save_snapshot(self, snap: Snapshot) -> None:
         snap_path = self.snap_path(snap.id)
-        snap_path.write_text(json.dumps(asdict(snap), ensure_ascii=False, indent=2), encoding="utf-8")
+        save_snapshot_file(snap_path, asdict(snap))
         snap_mtime = snapshot_mtime(snap_path)
         self.index["snapshots"].insert(0, {
             "id": snap.id,
@@ -2151,6 +2301,87 @@ class MainWindow(QtWidgets.QMainWindow):
         self.detail.setText(text)
 
     # ----- actions -----
+    def edit_selected(self) -> None:
+        """Open edit dialog for the selected snapshot."""
+        sid = self.selected_id()
+        if not sid:
+            self.statusBar().showMessage("편집할 스냅샷을 선택하세요.", 2000)
+            return
+        snap = self.load_snapshot(sid)
+        if not snap:
+            QtWidgets.QMessageBox.warning(self, "Error", "스냅샷 파일을 찾을 수 없습니다.")
+            return
+        
+        dlg = EditSnapshotDialog(
+            self,
+            snap,
+            self.settings.get("tags", DEFAULT_TAGS),
+            self.settings.get("templates", []),
+        )
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        
+        v = dlg.values()
+        self._update_snapshot(
+            sid,
+            title=v["title"],
+            root=v["root"],
+            workspace=v["workspace"],
+            note=v["note"],
+            todos=v["todos"],
+            tags=v["tags"],
+        )
+        self.statusBar().showMessage("스냅샷이 업데이트되었습니다.", 2500)
+    
+    def _update_snapshot(
+        self,
+        sid: str,
+        *,
+        title: str,
+        root: str,
+        workspace: str,
+        note: str,
+        todos: List[str],
+        tags: List[str],
+    ) -> None:
+        """Update an existing snapshot with new data."""
+        snap = self.load_snapshot(sid)
+        if not snap:
+            return
+        
+        # Update snapshot fields
+        snap["title"] = title
+        snap["root"] = root
+        snap["vscode_workspace"] = workspace
+        snap["note"] = note
+        snap["todos"] = todos[:3]
+        snap["tags"] = tags
+        
+        # Write updated snapshot file
+        snap_path = self.snap_path(sid)
+        save_snapshot_file(snap_path, snap)
+        snap_mtime = snapshot_mtime(snap_path)
+        
+        # Update index entry
+        for it in self.index.get("snapshots", []):
+            if it.get("id") == sid:
+                it["title"] = title
+                it["root"] = root
+                it["vscode_workspace"] = workspace
+                it["tags"] = tags
+                it["search_blob"] = build_search_blob(snap)
+                it["search_blob_mtime"] = snap_mtime
+                break
+        save_json(self.index_path, self.index)
+        
+        # Update default_root setting
+        self.settings["default_root"] = root
+        save_json(self.settings_path, self.settings)
+        
+        # Refresh UI
+        self.refresh_list(reset_page=False)
+        self.on_select(self.listw.currentIndex(), QtCore.QModelIndex())
+
     def new_snapshot(self) -> None:
         dlg = SnapshotDialog(
             self,
@@ -2178,6 +2409,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _create_snapshot(self, root: str, title: str, workspace: str, note: str, todos: List[str], tags: List[str]) -> None:
         root_path = Path(root).resolve()
+
+        # Check for duplication (same root and title in active snapshots)
+        for it in self.index.get("snapshots", []):
+            if not bool(it.get("archived", False)):
+                if it.get("title") == title and Path(it.get("root", "")).resolve() == root_path:
+                    r = QtWidgets.QMessageBox.warning(
+                        self,
+                        "Duplicate Snapshot",
+                        "동일한 제목과 경로의 스냅샷이 이미 존재합니다.\n그래도 생성하시겠습니까?",
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                    )
+                    if r != QtWidgets.QMessageBox.Yes:
+                        return
+                    break
         ws = workspace.strip()
         if not ws:
             # if exactly one workspace file exists under root, use it
@@ -2248,7 +2493,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if tags is not None:
             snap["tags"] = tags
         # write snapshot file
-        self.snap_path(sid).write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_snapshot_file(self.snap_path(sid), snap)
 
         # update index
         for it in self.index.get("snapshots", []):
@@ -2377,7 +2622,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if strategy == "merge" and sid in existing_ids:
                     continue
                 try:
-                    self.snap_path(sid).write_text(json.dumps(migrate_snapshot(snap), ensure_ascii=False, indent=2), encoding="utf-8")
+                    save_snapshot_file(self.snap_path(sid), migrate_snapshot(snap))
                 except Exception as e:
                     log_exc("write imported snapshot", e)
                     continue
@@ -2467,7 +2712,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        Path(path).write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_snapshot_file(Path(path), snap)
         self.statusBar().showMessage("Snapshot exported.", 2500)
 
     def export_weekly_report(self) -> None:
@@ -2479,9 +2724,8 @@ class MainWindow(QtWidgets.QMainWindow):
         cutoff = datetime.now() - timedelta(days=7)
         lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
         for it in self.index.get("snapshots", []):
-            try:
-                created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
-            except Exception:
+            created_at = safe_parse_datetime(it.get("created_at", ""))
+            if not created_at:
                 continue
             if created_at < cutoff:
                 continue
@@ -2505,19 +2749,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage("Weekly report exported.", 2500)
 
     def open_compare_dialog(self) -> None:
-        snapshots = []
-        for it in self.index.get("snapshots", []):
-            sid = it.get("id")
-            if not sid:
-                continue
-            snap = self.load_snapshot(sid)
-            if snap:
-                snapshots.append(snap)
+        snapshots = [s for s in self.index.get("snapshots", []) if s.get("id")]
         if len(snapshots) < 2:
             QtWidgets.QMessageBox.information(self, "Compare", "Need at least two snapshots to compare.")
             return
-        dlg = CompareDialog(self, snapshots)
+        dlg = CompareDialog(self, snapshots, loader=self.load_snapshot)
         dlg.exec()
+
 
     def open_restore_history(self) -> None:
         history_path = app_dir() / "restore_history.json"
@@ -2583,22 +2821,28 @@ class MainWindow(QtWidgets.QMainWindow):
         root = Path(snap["root"]).expanduser()
         root_exists = root.exists()
         root_missing = False
+        errors: List[str] = []
+        
         if ch.get("open_folder"):
-            if root_exists:
-                open_folder(root)
-            else:
+            success, error = open_folder(root)
+            if not success:
                 root_missing = True
-                QtWidgets.QMessageBox.warning(self, "Restore", f"Root folder missing: {root}")
+                errors.append(f"폴더 열기 실패: {error}")
+        
         if ch.get("open_terminal"):
-            if root_exists:
-                open_terminal_at(root)
-            else:
+            success, error = open_terminal_at(root)
+            if not success:
                 root_missing = True
-                QtWidgets.QMessageBox.warning(self, "Restore", f"Root folder missing: {root}")
-        vscode_opened = None
+                errors.append(f"터미널 열기 실패: {error}")
+        
+        vscode_opened = False
         if ch.get("open_vscode"):
             target = resolve_vscode_target(snap)
-            vscode_opened = open_vscode_at(target)
+            success, error = open_vscode_at(target)
+            vscode_opened = success
+            if not success:
+                errors.append(f"VSCode 열기 실패: {error}")
+        
         requested_apps = []
         if ch.get("open_running_apps"):
             requested_apps = ch.get("running_apps") or snap.get("running_apps", [])
@@ -2619,6 +2863,14 @@ class MainWindow(QtWidgets.QMainWindow):
             "vscode_opened": vscode_opened,
         })
 
+        # Show errors if any
+        if errors:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Restore", 
+                "일부 복원 작업에서 문제가 발생했습니다:\n" + "\n".join(errors)
+            )
+        
         if show_checklist:
             todos = snap.get("todos", [])
             if any(todos):

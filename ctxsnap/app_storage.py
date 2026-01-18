@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS, DEFAULT_TAGS
 
@@ -91,26 +92,106 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
     return snaps, index_path, settings_path
 
 
-def load_json(p: Path) -> Dict[str, Any]:
-    return json.loads(p.read_text(encoding="utf-8"))
+def load_json(p: Path, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Load JSON file with error handling.
+    
+    Args:
+        p: Path to JSON file
+        default: Default value if file doesn't exist or is corrupted
+    
+    Returns:
+        Parsed JSON data or default value
+    """
+    if default is None:
+        default = {}
+    try:
+        if not p.exists():
+            LOGGER.warning("JSON file not found: %s, using default", p)
+            return default.copy()
+        content = p.read_text(encoding="utf-8")
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            LOGGER.warning("JSON file %s is not a dict, using default", p)
+            return default.copy()
+        return data
+    except json.JSONDecodeError as e:
+        LOGGER.exception("JSON decode error in %s: %s", p, e)
+        # Try to backup corrupted file
+        try:
+            corrupted_path = p.with_suffix(".corrupted.json")
+            if p.exists():
+                p.rename(corrupted_path)
+                LOGGER.info("Corrupted file backed up to %s", corrupted_path)
+        except Exception:
+            pass
+        return default.copy()
+    except Exception as e:
+        LOGGER.exception("Failed to load JSON from %s: %s", p, e)
+        return default.copy()
 
 
-def save_json(p: Path, data: Dict[str, Any]) -> None:
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def save_json(p: Path, data: Dict[str, Any]) -> bool:
+    """Save JSON file atomically using temp file + rename pattern.
+    
+    This prevents data corruption if the app crashes during write.
+    
+    Args:
+        p: Path to save JSON file
+        data: Data to save
+    
+    Returns:
+        True if save was successful, False otherwise
+    """
+    try:
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        # Write to temp file first, then rename (atomic on most filesystems)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp",
+            prefix=p.stem + "_",
+            dir=str(p.parent)
+        )
+        fd_closed = False
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd_closed = True
+            # On Windows, need to remove target first
+            if p.exists():
+                p.unlink()
+            Path(tmp_path).rename(p)
+            return True
+        except Exception as e:
+            if not fd_closed:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            LOGGER.exception("Failed to write temp file %s: %s", tmp_path, e)
+            # Clean up temp file
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
+    except Exception as e:
+        LOGGER.exception("Failed to save JSON to %s: %s", p, e)
+        return False
 
 
 def append_restore_history(entry: Dict[str, Any]) -> None:
+    """Append a restore entry to history with atomic write.
+    
+    Args:
+        entry: Restore history entry to append
+    """
     path = app_dir() / "restore_history.json"
-    history = {"restores": []}
-    if path.exists():
-        try:
-            history = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            history = {"restores": []}
+    history = load_json(path, default={"restores": []})
     history.setdefault("restores", [])
     history["restores"].insert(0, entry)
     history["restores"] = history["restores"][:200]
-    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not save_json(path, history):
+        LOGGER.warning("Failed to save restore history")
 
 
 def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -246,3 +327,17 @@ def now_iso() -> str:
 
 def gen_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def save_snapshot_file(path: Path, snap: Dict[str, Any]) -> bool:
+    """Save snapshot file atomically.
+    
+    Args:
+        path: Path to snapshot file
+        snap: Snapshot data to save
+    
+    Returns:
+        True if save was successful, False otherwise
+    """
+    return save_json(path, snap)
+

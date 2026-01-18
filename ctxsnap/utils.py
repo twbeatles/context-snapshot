@@ -5,6 +5,7 @@ import fnmatch
 import logging
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -15,6 +16,15 @@ from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS
 
 APP_NAME = "ctxsnap"
 LOGGER = logging.getLogger(APP_NAME)
+
+
+def safe_parse_datetime(s: str) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
 
 
 def recent_files_under(
