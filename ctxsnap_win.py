@@ -70,6 +70,42 @@ def log_exc(context: str, e: Exception) -> None:
         pass
 
 
+class RecentFilesWorker(QtCore.QObject):
+    finished = QtCore.Signal(str, list)
+    failed = QtCore.Signal(str, str)
+
+    def __init__(
+        self,
+        sid: str,
+        root: Path,
+        *,
+        limit: int,
+        exclude_dirs: List[str],
+        scan_limit: int,
+        scan_seconds: float,
+    ) -> None:
+        super().__init__()
+        self.sid = sid
+        self.root = root
+        self.limit = limit
+        self.exclude_dirs = exclude_dirs
+        self.scan_limit = scan_limit
+        self.scan_seconds = scan_seconds
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            files = recent_files_under(
+                self.root,
+                limit=self.limit,
+                exclude_dirs=self.exclude_dirs,
+                scan_limit=self.scan_limit,
+                scan_seconds=self.scan_seconds,
+            )
+            self.finished.emit(self.sid, files)
+        except Exception as exc:
+            self.failed.emit(self.sid, str(exc))
+
 
 def git_title_suggestion(root: Path) -> Optional[str]:
     git = shutil.which("git")
@@ -585,6 +621,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.scan_seconds_spin.setSingleStep(0.5)
         self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
         self.scan_seconds_spin.setSuffix(" sec")
+        self.background_recent = QtWidgets.QCheckBox("Collect recent files in background")
+        self.background_recent.setToolTip("스냅샷을 먼저 저장하고, 최근 파일 목록을 백그라운드에서 채웁니다.")
+        self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
         self.auto_snapshot_minutes = QtWidgets.QSpinBox()
         self.auto_snapshot_minutes.setRange(0, 1440)
         self.auto_snapshot_minutes.setSuffix(" min")
@@ -614,6 +653,7 @@ class SettingsDialog(QtWidgets.QDialog):
         scan_row.addStretch(1)
         scan_row.addWidget(self.scan_limit_spin)
         scan_row.addWidget(self.scan_seconds_spin)
+        scan_row.addWidget(self.background_recent)
         auto_row = QtWidgets.QHBoxLayout()
         auto_row.addWidget(QtWidgets.QLabel("Auto snapshot interval"))
         auto_row.addStretch(1)
@@ -838,6 +878,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.recent_spin.setValue(int(settings.get("recent_files_limit", 30)))
         self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
         self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
+        self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
         self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
         self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
         capture = settings.get("capture", {})
@@ -904,6 +945,7 @@ class SettingsDialog(QtWidgets.QDialog):
             },
             "recent_files_scan_limit": int(self.scan_limit_spin.value()),
             "recent_files_scan_seconds": float(self.scan_seconds_spin.value()),
+            "recent_files_background": bool(self.background_recent.isChecked()),
             "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
             "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
             "recent_files_exclude": [
@@ -1155,7 +1197,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
 
         self.search = QtWidgets.QLineEdit()
-        self.search.setPlaceholderText("Search snapshots (title/root)...")
+        self.search.setPlaceholderText("Search snapshots (title/root/note/todo/files/apps)...")
         self.search.textChanged.connect(self.refresh_list)
 
         self.selected_tags: set[str] = set()
@@ -1262,6 +1304,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_git_state = None
         self._update_auto_snapshot_timer()
         self.git_timer.start()
+        self._recent_workers: Dict[str, QtCore.QThread] = {}
 
         # external hook (set by main) to re-apply hotkey settings
         self.on_settings_applied = None
@@ -1290,6 +1333,50 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._last_git_state and self._last_git_state != state:
             self.quick_snapshot()
         self._last_git_state = state
+
+    def _start_recent_files_scan(self, sid: str, root: Path) -> None:
+        worker = RecentFilesWorker(
+            sid,
+            root,
+            limit=int(self.settings.get("recent_files_limit", 30)),
+            exclude_dirs=self.settings.get("recent_files_exclude", []),
+            scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
+            scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
+        )
+        thread = QtCore.QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_recent_files_ready)
+        worker.failed.connect(self._on_recent_files_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._recent_workers.pop(sid, None))
+        thread.finished.connect(thread.deleteLater)
+        thread.worker = worker
+        self._recent_workers[sid] = thread
+        thread.start()
+
+    def _on_recent_files_ready(self, sid: str, files: List[str]) -> None:
+        snap = self.load_snapshot(sid)
+        if not snap:
+            return
+        snap["recent_files"] = files
+        snap_path = self.snap_path(sid)
+        snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        snap_mtime = snapshot_mtime(snap_path)
+        for it in self.index.get("snapshots", []):
+            if it.get("id") == sid:
+                it["search_blob"] = build_search_blob(snap)
+                it["search_blob_mtime"] = snap_mtime
+                break
+        save_json(self.index_path, self.index)
+        self.refresh_list()
+        self.statusBar().showMessage("Recent files updated in background.", 2500)
+
+    def _on_recent_files_failed(self, sid: str, error: str) -> None:
+        log_exc(f"recent files background scan ({sid})", Exception(error))
 
     def _build_tag_menu(self) -> None:
         menu = QtWidgets.QMenu(self)
@@ -1502,6 +1589,16 @@ class MainWindow(QtWidgets.QMainWindow):
         capture_recent = bool(capture.get("recent_files", True))
         capture_processes = bool(capture.get("processes", True))
         capture_running_apps = bool(capture.get("running_apps", True))
+        background_recent = bool(self.settings.get("recent_files_background", False))
+        recent_files: List[str] = []
+        if capture_recent and not background_recent:
+            recent_files = recent_files_under(
+                root_path,
+                limit=int(self.settings.get("recent_files_limit", 30)),
+                exclude_dirs=self.settings.get("recent_files_exclude", []),
+                scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
+                scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
+            )
         snap = Snapshot(
             id=sid,
             title=title,
@@ -1512,17 +1609,13 @@ class MainWindow(QtWidgets.QMainWindow):
             todos=todos[:3],
             tags=tags,
             pinned=False,
-            recent_files=recent_files_under(
-                root_path,
-                limit=int(self.settings.get("recent_files_limit", 30)),
-                exclude_dirs=self.settings.get("recent_files_exclude", []),
-                scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
-                scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
-            ) if capture_recent else [],
+            recent_files=recent_files,
             processes=list_processes_filtered() if capture_processes else [],
             running_apps=list_running_apps() if capture_running_apps else [],
         )
         self.save_snapshot(snap)
+        if capture_recent and background_recent:
+            self._start_recent_files_scan(sid, root_path)
         self.refresh_list()
         self.listw.setCurrentRow(0)
         self.statusBar().showMessage(f"Saved snapshot: {sid}", 3500)
