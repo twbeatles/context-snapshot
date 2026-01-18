@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -87,11 +87,14 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                     "recent_files_exclude": [".git", "node_modules", "venv", "dist", "build"],
                     "recent_files_scan_limit": 20000,
                     "recent_files_scan_seconds": 2.0,
+                    "auto_snapshot_minutes": 0,
+                    "auto_snapshot_on_git_change": False,
                     "restore": {
                         "open_folder": True,
                         "open_terminal": True,
                         "open_vscode": True,
                         "open_running_apps": True,
+                        "show_post_restore_checklist": True,
                     },
                 },
                 ensure_ascii=False,
@@ -110,6 +113,20 @@ def save_json(p: Path, data: Dict[str, Any]) -> None:
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def append_restore_history(entry: Dict[str, Any]) -> None:
+    path = app_dir() / "restore_history.json"
+    history = {"restores": []}
+    if path.exists():
+        try:
+            history = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            history = {"restores": []}
+    history.setdefault("restores", [])
+    history["restores"].insert(0, entry)
+    history["restores"] = history["restores"][:200]
+    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Backfill missing keys for older settings.json."""
     settings.setdefault("default_root", str(Path.home()))
@@ -121,6 +138,8 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("recent_files_exclude", [".git", "node_modules", "venv", "dist", "build"])
     settings.setdefault("recent_files_scan_limit", 20000)
     settings.setdefault("recent_files_scan_seconds", 2.0)
+    settings.setdefault("auto_snapshot_minutes", 0)
+    settings.setdefault("auto_snapshot_on_git_change", False)
     settings.setdefault(
         "restore",
         {
@@ -128,6 +147,7 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
             "open_terminal": True,
             "open_vscode": True,
             "open_running_apps": True,
+            "show_post_restore_checklist": True,
         },
     )
     # UX
@@ -265,6 +285,20 @@ def git_title_suggestion(root: Path) -> Optional[str]:
         branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
         subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True).strip()
         return f"{root.name} [{branch}] - {subj}"
+    except Exception:
+        return None
+
+
+def git_state(root: Path) -> Optional[Tuple[str, str]]:
+    git = shutil.which("git")
+    if not git:
+        return None
+    if not (root / ".git").exists():
+        return None
+    try:
+        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        sha = subprocess.check_output([git, "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+        return branch, sha
     except Exception:
         return None
 
@@ -575,6 +609,15 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         todos = snap.get("todos", [])
         recent = snap.get("recent_files", [])
         running_apps = snap.get("running_apps", [])
+        self.apps_list = QtWidgets.QListWidget()
+        self.apps_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        for app in running_apps:
+            label = f"{app.get('name','')}  {app.get('exe','')}"
+            item = QtWidgets.QListWidgetItem(label)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if open_running_apps else QtCore.Qt.Unchecked)
+            item.setData(QtCore.Qt.UserRole, app)
+            self.apps_list.addItem(item)
 
         info = QtWidgets.QTextEdit()
         info.setReadOnly(True)
@@ -606,16 +649,25 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         layout.addWidget(self.cb_terminal)
         layout.addWidget(self.cb_vscode)
         layout.addWidget(self.cb_running_apps)
+        if running_apps:
+            layout.addWidget(QtWidgets.QLabel("Running apps to restore"))
+            layout.addWidget(self.apps_list, 1)
         layout.addSpacing(6)
         layout.addWidget(info, 1)
         layout.addLayout(btn_row)
 
     def choices(self) -> Dict[str, bool]:
+        selected_apps = []
+        for i in range(self.apps_list.count()):
+            it = self.apps_list.item(i)
+            if it.checkState() == QtCore.Qt.Checked:
+                selected_apps.append(it.data(QtCore.Qt.UserRole))
         return {
             "open_folder": self.cb_folder.isChecked(),
             "open_terminal": self.cb_terminal.isChecked(),
             "open_vscode": self.cb_vscode.isChecked(),
             "open_running_apps": self.cb_running_apps.isChecked(),
+            "running_apps": selected_apps,
         }
 
 
@@ -693,10 +745,12 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_terminal = QtWidgets.QCheckBox("Open terminal")
         self.rs_vscode = QtWidgets.QCheckBox("Open VSCode")
         self.rs_running_apps = QtWidgets.QCheckBox("Open running apps (taskbar)")
+        self.rs_checklist = QtWidgets.QCheckBox("Show post-restore checklist")
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
 
         self.preview_default = QtWidgets.QCheckBox("Show restore preview by default")
         self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
@@ -708,6 +762,7 @@ class SettingsDialog(QtWidgets.QDialog):
         restore_l.addWidget(self.rs_terminal)
         restore_l.addWidget(self.rs_vscode)
         restore_l.addWidget(self.rs_running_apps)
+        restore_l.addWidget(self.rs_checklist)
         restore_l.addSpacing(8)
         restore_l.addWidget(self.preview_default)
         restore_hint = QtWidgets.QLabel(
@@ -734,6 +789,12 @@ class SettingsDialog(QtWidgets.QDialog):
         self.scan_seconds_spin.setSingleStep(0.5)
         self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
         self.scan_seconds_spin.setSuffix(" sec")
+        self.auto_snapshot_minutes = QtWidgets.QSpinBox()
+        self.auto_snapshot_minutes.setRange(0, 1440)
+        self.auto_snapshot_minutes.setSuffix(" min")
+        self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
+        self.auto_snapshot_on_git = QtWidgets.QCheckBox("Auto snapshot on git change")
+        self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
         capture = settings.get("capture", {})
         self.capture_recent = QtWidgets.QCheckBox("Capture recent files")
         self.capture_processes = QtWidgets.QCheckBox("Capture running processes")
@@ -757,6 +818,10 @@ class SettingsDialog(QtWidgets.QDialog):
         scan_row.addStretch(1)
         scan_row.addWidget(self.scan_limit_spin)
         scan_row.addWidget(self.scan_seconds_spin)
+        auto_row = QtWidgets.QHBoxLayout()
+        auto_row.addWidget(QtWidgets.QLabel("Auto snapshot interval"))
+        auto_row.addStretch(1)
+        auto_row.addWidget(self.auto_snapshot_minutes)
         capture_row = QtWidgets.QVBoxLayout()
         capture_row.addWidget(self.capture_recent)
         capture_row.addWidget(self.capture_processes)
@@ -769,6 +834,8 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addLayout(rf_row)
         general_layout.addLayout(capture_row)
         general_layout.addLayout(scan_row)
+        general_layout.addLayout(auto_row)
+        general_layout.addWidget(self.auto_snapshot_on_git)
         general_layout.addWidget(QtWidgets.QLabel("Exclude folders for recent file scan"))
         general_layout.addWidget(self.exclude_dirs)
         privacy_hint = QtWidgets.QLabel(
@@ -969,11 +1036,14 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
         self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
 
         self.recent_spin.setValue(int(settings.get("recent_files_limit", 30)))
         self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
         self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
+        self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
+        self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
         capture = settings.get("capture", {})
         self.capture_recent.setChecked(bool(capture.get("recent_files", True)))
         self.capture_processes.setChecked(bool(capture.get("processes", True)))
@@ -1038,6 +1108,8 @@ class SettingsDialog(QtWidgets.QDialog):
             },
             "recent_files_scan_limit": int(self.scan_limit_spin.value()),
             "recent_files_scan_seconds": float(self.scan_seconds_spin.value()),
+            "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
+            "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
             "recent_files_exclude": [
                 part.strip() for part in self.exclude_dirs.text().split(",") if part.strip()
             ],
@@ -1046,6 +1118,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 "open_terminal": bool(self.rs_terminal.isChecked()),
                 "open_vscode": bool(self.rs_vscode.isChecked()),
                 "open_running_apps": bool(self.rs_running_apps.isChecked()),
+                "show_post_restore_checklist": bool(self.rs_checklist.isChecked()),
             },
         }
 
@@ -1218,7 +1291,18 @@ class MainWindow(QtWidgets.QMainWindow):
         m_tools = mb.addMenu("Tools")
         a_settings = QtGui.QAction("Settings…", self)
         a_settings.triggered.connect(self.open_settings)
+        a_export_snap = QtGui.QAction("Export Selected Snapshot…", self)
+        a_export_snap.triggered.connect(self.export_selected_snapshot)
+        a_report = QtGui.QAction("Export Weekly Report…", self)
+        a_report.triggered.connect(self.export_weekly_report)
+        a_history = QtGui.QAction("Open Restore History", self)
+        a_history.triggered.connect(self.open_restore_history)
         m_tools.addAction(a_settings)
+        m_tools.addSeparator()
+        m_tools.addAction(a_export_snap)
+        m_tools.addAction(a_report)
+        m_tools.addSeparator()
+        m_tools.addAction(a_history)
 
         m_help = mb.addMenu("Help")
         a_onb = QtGui.QAction("Onboarding…", self)
@@ -1278,11 +1362,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search.setPlaceholderText("Search snapshots (title/root)...")
         self.search.textChanged.connect(self.refresh_list)
 
-        self.tag_filter = QtWidgets.QComboBox()
-        self.tag_filter.addItem("All tags")
-        for t in self.settings.get("tags", DEFAULT_TAGS):
-            self.tag_filter.addItem(t)
-        self.tag_filter.currentIndexChanged.connect(self.refresh_list)
+        self.selected_tags: set[str] = set()
+        self.tag_filter_btn = QtWidgets.QToolButton()
+        self.tag_filter_btn.setText("Tags")
+        self.tag_filter_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self._build_tag_menu()
+
+        self.days_filter = QtWidgets.QComboBox()
+        self.days_filter.addItems(["All time", "Last 1 day", "Last 3 days", "Last 7 days", "Last 30 days"])
+        self.days_filter.currentIndexChanged.connect(self.refresh_list)
+
+        self.sort_combo = QtWidgets.QComboBox()
+        self.sort_combo.addItems(["Newest", "Oldest", "Pinned first", "Title"])
+        self.sort_combo.currentIndexChanged.connect(self.refresh_list)
 
         self.pinned_only = QtWidgets.QCheckBox("Pinned only")
         self.pinned_only.stateChanged.connect(self.refresh_list)
@@ -1321,7 +1413,9 @@ class MainWindow(QtWidgets.QMainWindow):
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
         search_row.addWidget(self.search, 1)
-        search_row.addWidget(self.tag_filter)
+        search_row.addWidget(self.tag_filter_btn)
+        search_row.addWidget(self.days_filter)
+        search_row.addWidget(self.sort_combo)
         search_row.addWidget(self.pinned_only)
         left.addLayout(search_row)
         left.addWidget(self.listw, 1)
@@ -1364,24 +1458,107 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.statusBar().showMessage(f"Storage: {app_dir()}")
 
+        self.auto_timer = QtCore.QTimer(self)
+        self.auto_timer.timeout.connect(self._auto_snapshot_prompt)
+        self.git_timer = QtCore.QTimer(self)
+        self.git_timer.setInterval(60_000)
+        self.git_timer.timeout.connect(self._check_git_change)
+        self._last_git_state = None
+        self._update_auto_snapshot_timer()
+        self.git_timer.start()
+
         # external hook (set by main) to re-apply hotkey settings
         self.on_settings_applied = None
+
+    def _auto_snapshot_prompt(self) -> None:
+        if int(self.settings.get("auto_snapshot_minutes", 0)) <= 0:
+            return
+        self.quick_snapshot()
+
+    def _update_auto_snapshot_timer(self) -> None:
+        minutes = int(self.settings.get("auto_snapshot_minutes", 0))
+        if minutes <= 0:
+            self.auto_timer.stop()
+            return
+        self.auto_timer.setInterval(minutes * 60_000)
+        if not self.auto_timer.isActive():
+            self.auto_timer.start()
+
+    def _check_git_change(self) -> None:
+        if not bool(self.settings.get("auto_snapshot_on_git_change", False)):
+            return
+        root = Path(self.settings.get("default_root", str(Path.home())))
+        state = git_state(root)
+        if not state:
+            return
+        if self._last_git_state and self._last_git_state != state:
+            self.quick_snapshot()
+        self._last_git_state = state
+
+    def _build_tag_menu(self) -> None:
+        menu = QtWidgets.QMenu(self)
+        clear_action = QtGui.QAction("All tags", self)
+        clear_action.triggered.connect(self._clear_tag_filter)
+        menu.addAction(clear_action)
+        menu.addSeparator()
+        tags = self.settings.get("tags", DEFAULT_TAGS)
+        self.selected_tags.intersection_update(tags)
+        for tag in tags:
+            action = QtGui.QAction(tag, self)
+            action.setCheckable(True)
+            action.setChecked(tag in self.selected_tags)
+            action.triggered.connect(self._toggle_tag_filter)
+            menu.addAction(action)
+        self.tag_filter_btn.setMenu(menu)
+
+    def _toggle_tag_filter(self) -> None:
+        action = self.sender()
+        if isinstance(action, QtGui.QAction):
+            tag = action.text()
+            if action.isChecked():
+                self.selected_tags.add(tag)
+            else:
+                self.selected_tags.discard(tag)
+        self.refresh_list()
+
+    def _clear_tag_filter(self) -> None:
+        self.selected_tags.clear()
+        self._build_tag_menu()
+        self.refresh_list()
 
     # ----- index helpers -----
     def refresh_list(self) -> None:
         query = self.search.text().strip().lower()
-        selected_tag = self.tag_filter.currentText() if hasattr(self, "tag_filter") else "All tags"
         pinned_only = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
 
         self.listw.clear()
         items = list(self.index.get("snapshots", []))
         index_changed = False
 
-        # pinned first
-        items.sort(key=lambda x: (not bool(x.get("pinned", False)), x.get("created_at", "")), reverse=False)
+        sort_mode = self.sort_combo.currentText() if hasattr(self, "sort_combo") else "Newest"
+        if sort_mode == "Pinned first":
+            items.sort(key=lambda x: (not bool(x.get("pinned", False)), x.get("created_at", "")), reverse=False)
+        elif sort_mode == "Oldest":
+            items.sort(key=lambda x: x.get("created_at", ""))
+        elif sort_mode == "Title":
+            items.sort(key=lambda x: (x.get("title", "").lower(), x.get("created_at", "")))
+        else:
+            items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        days_filter = self.days_filter.currentText() if hasattr(self, "days_filter") else "All time"
+        now = datetime.now()
+        day_cutoff = None
+        if days_filter.startswith("Last"):
+            try:
+                days = int(days_filter.split()[1])
+                day_cutoff = now - timedelta(days=days)
+            except Exception:
+                day_cutoff = None
 
         for it in items:
             tags = it.get("tags", []) or []
+            if self.selected_tags and not self.selected_tags.intersection(tags):
+                continue
             base_hay = f"{it.get('title','')} {it.get('root','')} {' '.join(tags)}".lower()
             if query and query not in base_hay:
                 search_blob = (it.get("search_blob") or "").lower()
@@ -1403,8 +1580,13 @@ class MainWindow(QtWidgets.QMainWindow):
             if pinned_only and not bool(it.get("pinned", False)):
                 continue
 
-            if selected_tag != "All tags" and selected_tag not in tags:
-                continue
+            if day_cutoff:
+                try:
+                    created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
+                    if created_at < day_cutoff:
+                        continue
+                except Exception:
+                    pass
 
             title = it.get("title", "")
             root = it.get("root", "")
@@ -1595,12 +1777,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 log_exc("save settings", e)
 
         # Refresh tag filter
-        self.tag_filter.blockSignals(True)
-        self.tag_filter.clear()
-        self.tag_filter.addItem("All tags")
-        for t in self.settings.get("tags", DEFAULT_TAGS):
-            self.tag_filter.addItem(t)
-        self.tag_filter.blockSignals(False)
+        self._build_tag_menu()
         self.refresh_list()
 
         # Update labels
@@ -1610,6 +1787,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if callable(self.on_settings_applied):
             self.on_settings_applied()
+        self._update_auto_snapshot_timer()
 
     def _auto_backup_current(self) -> Path:
         backups = app_dir() / "backups"
@@ -1751,6 +1929,63 @@ class MainWindow(QtWidgets.QMainWindow):
         if not ok:
             QtWidgets.QMessageBox.information(self, "VSCode", "'code' 명령을 찾을 수 없습니다. VSCode에서 Command Palette -> 'Shell Command: Install code command in PATH'를 실행해보세요.")
 
+    def export_selected_snapshot(self) -> None:
+        sid = self.selected_id()
+        if not sid:
+            return
+        snap = self.load_snapshot(sid)
+        if not snap:
+            return
+        default_name = f"snapshot_{sid}.json"
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export snapshot", str(Path.home() / default_name), "JSON files (*.json)"
+        )
+        if not path:
+            return
+        Path(path).write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.statusBar().showMessage("Snapshot exported.", 2500)
+
+    def export_weekly_report(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export weekly report", str(Path.home() / "ctxsnap_weekly_report.md"), "Markdown files (*.md)"
+        )
+        if not path:
+            return
+        cutoff = datetime.now() - timedelta(days=7)
+        lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
+        for it in self.index.get("snapshots", []):
+            try:
+                created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                continue
+            if created_at < cutoff:
+                continue
+            snap = self.load_snapshot(it.get("id", "")) or {}
+            lines.append(f"## {snap.get('title','(no title)')}")
+            lines.append(f"- Created: {snap.get('created_at','')}")
+            lines.append(f"- Root: {snap.get('root','')}")
+            tags = snap.get("tags", [])
+            if tags:
+                lines.append(f"- Tags: {', '.join(tags)}")
+            todos = [t for t in snap.get("todos", []) if t]
+            if todos:
+                lines.append("### TODOs")
+                lines.extend([f"- {t}" for t in todos])
+            note = snap.get("note", "")
+            if note:
+                lines.append("### Note")
+                lines.append(note)
+            lines.append("")
+        Path(path).write_text("\n".join(lines), encoding="utf-8")
+        self.statusBar().showMessage("Weekly report exported.", 2500)
+
+    def open_restore_history(self) -> None:
+        history_path = app_dir() / "restore_history.json"
+        if history_path.exists():
+            open_folder(history_path.parent)
+        else:
+            QtWidgets.QMessageBox.information(self, "Restore history", "No restore history yet.")
+
     def restore_last(self) -> None:
         items = self.index.get("snapshots", [])
         if not items:
@@ -1777,6 +2012,7 @@ class MainWindow(QtWidgets.QMainWindow):
         open_terminal_default = bool(restore_cfg.get("open_terminal", True))
         open_vscode_default = bool(restore_cfg.get("open_vscode", True))
         open_running_apps_default = bool(restore_cfg.get("open_running_apps", True))
+        show_checklist = bool(restore_cfg.get("show_post_restore_checklist", True))
         preview_default = bool(self.settings.get("restore_preview_default", True))
 
         if preview_default:
@@ -1808,8 +2044,26 @@ class MainWindow(QtWidgets.QMainWindow):
             target = Path(snap.get("vscode_workspace") or snap["root"])
             open_vscode_at(target)
         if ch.get("open_running_apps"):
-            restore_running_apps(snap.get("running_apps", []), parent=self)
+            apps = ch.get("running_apps") or snap.get("running_apps", [])
+            restore_running_apps(apps, parent=self)
 
+        append_restore_history({
+            "snapshot_id": sid,
+            "created_at": now_iso(),
+            "open_folder": bool(ch.get("open_folder")),
+            "open_terminal": bool(ch.get("open_terminal")),
+            "open_vscode": bool(ch.get("open_vscode")),
+            "open_running_apps": bool(ch.get("open_running_apps")),
+        })
+
+        if show_checklist:
+            todos = snap.get("todos", [])
+            if any(todos):
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Checklist",
+                    "복원 후 체크리스트:\n" + "\n".join([f"- {t}" for t in todos if t]),
+                )
         self.statusBar().showMessage("Restore triggered.", 2500)
 
     def delete_selected(self) -> None:
