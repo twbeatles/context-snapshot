@@ -8,8 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS, DEFAULT_TAGS
+
 APP_NAME = "ctxsnap"
-DEFAULT_TAGS = ["업무", "개인", "부동산", "정산"]
 LOGGER = logging.getLogger(APP_NAME)
 
 
@@ -61,7 +62,17 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                     "recent_files_scan_limit": 20000,
                     "recent_files_scan_seconds": 2.0,
                     "recent_files_background": False,
+                    "recent_files_include": [],
+                    "recent_files_exclude_patterns": [],
                     "list_page_size": 200,
+                    "process_keywords": DEFAULT_PROCESS_KEYWORDS,
+                    "templates": [],
+                    "archive_after_days": 0,
+                    "archive_skip_pinned": True,
+                    "auto_backup_hours": 0,
+                    "auto_backup_last": "",
+                    "capture_note": True,
+                    "capture_todos": True,
                     "auto_snapshot_minutes": 0,
                     "auto_snapshot_on_git_change": False,
                     "restore": {
@@ -114,7 +125,17 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("recent_files_scan_limit", 20000)
     settings.setdefault("recent_files_scan_seconds", 2.0)
     settings.setdefault("recent_files_background", False)
+    settings.setdefault("recent_files_include", [])
+    settings.setdefault("recent_files_exclude_patterns", [])
     settings.setdefault("list_page_size", 200)
+    settings.setdefault("process_keywords", DEFAULT_PROCESS_KEYWORDS)
+    settings.setdefault("templates", [])
+    settings.setdefault("archive_after_days", 0)
+    settings.setdefault("archive_skip_pinned", True)
+    settings.setdefault("auto_backup_hours", 0)
+    settings.setdefault("auto_backup_last", "")
+    settings.setdefault("capture_note", True)
+    settings.setdefault("capture_todos", True)
     settings.setdefault("auto_snapshot_minutes", 0)
     settings.setdefault("auto_snapshot_on_git_change", False)
     settings.setdefault(

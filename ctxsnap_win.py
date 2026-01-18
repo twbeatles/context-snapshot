@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import difflib
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -15,7 +16,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ctxsnap.app_storage import (
-    DEFAULT_TAGS,
     Snapshot,
     append_restore_history,
     app_dir,
@@ -31,6 +31,7 @@ from ctxsnap.app_storage import (
     now_iso,
     save_json,
 )
+from ctxsnap.constants import DEFAULT_TAGS
 from ctxsnap.restore import open_folder, open_terminal_at, open_vscode_at, resolve_vscode_target
 from ctxsnap.utils import (
     build_search_blob,
@@ -81,6 +82,8 @@ class RecentFilesWorker(QtCore.QObject):
         *,
         limit: int,
         exclude_dirs: List[str],
+        include_patterns: List[str],
+        exclude_patterns: List[str],
         scan_limit: int,
         scan_seconds: float,
     ) -> None:
@@ -89,6 +92,8 @@ class RecentFilesWorker(QtCore.QObject):
         self.root = root
         self.limit = limit
         self.exclude_dirs = exclude_dirs
+        self.include_patterns = include_patterns
+        self.exclude_patterns = exclude_patterns
         self.scan_limit = scan_limit
         self.scan_seconds = scan_seconds
 
@@ -99,6 +104,8 @@ class RecentFilesWorker(QtCore.QObject):
                 self.root,
                 limit=self.limit,
                 exclude_dirs=self.exclude_dirs,
+                include_patterns=self.include_patterns,
+                exclude_patterns=self.exclude_patterns,
                 scan_limit=self.scan_limit,
                 scan_seconds=self.scan_seconds,
             )
@@ -290,11 +297,18 @@ QLabel#HintLabel { color: #b8b8c0; }
 
 
 class SnapshotDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget, default_root: str, available_tags: List[str]):
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget,
+        default_root: str,
+        available_tags: List[str],
+        templates: List[Dict[str, Any]],
+    ):
         super().__init__(parent)
         self.setWindowTitle("New Snapshot")
         self.setModal(True)
         self.setMinimumWidth(580)
+        self._templates = templates
 
         self.root_edit = QtWidgets.QLineEdit(default_root)
         self.title_edit = QtWidgets.QLineEdit("")
@@ -330,6 +344,17 @@ class SnapshotDialog(QtWidgets.QDialog):
         self.title_edit.setPlaceholderText("제목 (비워도 자동 생성)")
         self.note_edit.setPlaceholderText("메모 (선택)")
 
+        template_row = QtWidgets.QHBoxLayout()
+        self.template_combo = QtWidgets.QComboBox()
+        self.template_combo.addItem("템플릿 선택")
+        for tmpl in templates:
+            self.template_combo.addItem(str(tmpl.get("name", "")).strip() or "Untitled")
+        self.template_apply_btn = QtWidgets.QToolButton()
+        self.template_apply_btn.setText("적용")
+        self.template_apply_btn.clicked.connect(self.apply_template)
+        template_row.addWidget(self.template_combo, 1)
+        template_row.addWidget(self.template_apply_btn)
+
         pick_btn = QtWidgets.QToolButton()
         pick_btn.setText("폴더 선택")
         pick_btn.clicked.connect(self.pick_folder)
@@ -351,6 +376,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         form.addRow("Title", title_row)
         form.addRow("Workspace", ws_row)
         form.addRow("Note", self.note_edit)
+        form.addRow("Template", template_row)
 
         tags_box = QtWidgets.QGroupBox("Tags (optional)")
         tags_layout = QtWidgets.QVBoxLayout(tags_box)
@@ -456,6 +482,24 @@ class SnapshotDialog(QtWidgets.QDialog):
             title = sug or f"{Path(root).name} - {datetime.now().strftime('%m/%d %H:%M')}"
         return {"root": root, "title": title, "workspace": workspace, "note": note, "todos": todos, "tags": tags}
 
+    def apply_template(self):
+        idx = self.template_combo.currentIndex() - 1
+        if idx < 0 or idx >= len(self._templates):
+            return
+        tmpl = self._templates[idx]
+        note = str(tmpl.get("note", "") or "")
+        todos = tmpl.get("todos", []) or []
+        tags = tmpl.get("tags", []) or []
+        if note:
+            self.note_edit.setText(note)
+        if len(todos) >= 3:
+            self.todo1.setText(str(todos[0]))
+            self.todo2.setText(str(todos[1]))
+            self.todo3.setText(str(todos[2]))
+        for i in range(self.tags_list.count()):
+            it = self.tags_list.item(i)
+            it.setCheckState(QtCore.Qt.Checked if it.text() in tags else QtCore.Qt.Unchecked)
+
 
 class RestorePreviewDialog(QtWidgets.QDialog):
     def __init__(
@@ -552,6 +596,170 @@ class RestorePreviewDialog(QtWidgets.QDialog):
             "open_running_apps": self.cb_running_apps.isChecked(),
             "running_apps": selected_apps,
         }
+
+
+class ChecklistDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, todos: List[str]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Checklist")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+
+        title = QtWidgets.QLabel("복원 후 체크리스트")
+        title.setObjectName("TitleLabel")
+
+        self.listw = QtWidgets.QListWidget()
+        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        for t in todos:
+            it = QtWidgets.QListWidgetItem(t)
+            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.Unchecked)
+            self.listw.addItem(it)
+
+        btn_ok = QtWidgets.QPushButton("OK")
+        btn_ok.clicked.connect(self.accept)
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_ok)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(self.listw, 1)
+        layout.addLayout(btn_row)
+
+
+class RestoreHistoryDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, history: Dict[str, Any]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Restore History")
+        self.setModal(True)
+        self.setMinimumSize(640, 420)
+
+        title = QtWidgets.QLabel("Restore History")
+        title.setObjectName("TitleLabel")
+
+        self.listw = QtWidgets.QListWidget()
+        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.detail = QtWidgets.QTextEdit()
+        self.detail.setReadOnly(True)
+        self.detail.setPlaceholderText("Select a restore entry to view details.")
+
+        self._items = history.get("restores", []) if isinstance(history.get("restores"), list) else []
+        for entry in self._items:
+            label = f"{entry.get('created_at','')} • {entry.get('snapshot_id','')}"
+            self.listw.addItem(label)
+
+        self.listw.currentRowChanged.connect(self._on_select)
+
+        btn_close = QtWidgets.QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_close)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(self.listw, 1)
+        layout.addWidget(self.detail, 2)
+        layout.addLayout(btn_row)
+
+    def _on_select(self, row: int) -> None:
+        if row < 0 or row >= len(self._items):
+            self.detail.clear()
+            return
+        entry = self._items[row]
+        lines = [
+            f"Snapshot ID: {entry.get('snapshot_id','')}",
+            f"Created: {entry.get('created_at','')}",
+            f"Open folder: {entry.get('open_folder')}",
+            f"Open terminal: {entry.get('open_terminal')}",
+            f"Open VSCode: {entry.get('open_vscode')}",
+            f"Open running apps: {entry.get('open_running_apps')}",
+            f"Running apps requested: {entry.get('running_apps_requested')}",
+            f"Running apps failed: {entry.get('running_apps_failed')}",
+            f"Root missing: {entry.get('root_missing')}",
+            f"VSCode opened: {entry.get('vscode_opened')}",
+        ]
+        self.detail.setText("\n".join(str(l) for l in lines))
+
+
+class CompareDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, snapshots: List[Dict[str, Any]]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Compare Snapshots")
+        self.setModal(True)
+        self.setMinimumSize(720, 520)
+        self._snaps = snapshots
+
+        title = QtWidgets.QLabel("Compare two snapshots")
+        title.setObjectName("TitleLabel")
+
+        self.left_combo = QtWidgets.QComboBox()
+        self.right_combo = QtWidgets.QComboBox()
+        for snap in snapshots:
+            label = f"{snap.get('title','')} • {snap.get('created_at','')} • {snap.get('id','')}"
+            self.left_combo.addItem(label)
+            self.right_combo.addItem(label)
+
+        if snapshots:
+            self.left_combo.setCurrentIndex(0)
+            self.right_combo.setCurrentIndex(min(1, len(snapshots) - 1))
+
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("A"))
+        row.addWidget(self.left_combo, 1)
+        row.addWidget(QtWidgets.QLabel("B"))
+        row.addWidget(self.right_combo, 1)
+
+        self.diff_view = QtWidgets.QTextEdit()
+        self.diff_view.setReadOnly(True)
+
+        btn_compare = QtWidgets.QPushButton("Compare")
+        btn_compare.clicked.connect(self._run_compare)
+        btn_close = QtWidgets.QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_compare)
+        btn_row.addWidget(btn_close)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addLayout(row)
+        layout.addWidget(self.diff_view, 1)
+        layout.addLayout(btn_row)
+
+    def _serialize(self, snap: Dict[str, Any]) -> List[str]:
+        lines = [
+            f"Title: {snap.get('title','')}",
+            f"Created: {snap.get('created_at','')}",
+            f"Root: {snap.get('root','')}",
+            f"Note: {snap.get('note','')}",
+            "TODOs:",
+        ]
+        lines.extend([f"- {t}" for t in snap.get("todos", [])])
+        lines.append("Tags: " + ", ".join(snap.get("tags", []) or []))
+        lines.append("Recent files:")
+        lines.extend([f"- {p}" for p in snap.get("recent_files", [])])
+        lines.append("Processes:")
+        lines.extend([f"- {p.get('name','')} {p.get('exe','')}" for p in snap.get("processes", [])])
+        lines.append("Running apps:")
+        lines.extend([f"- {p.get('name','')} {p.get('exe','')}" for p in snap.get("running_apps", [])])
+        return lines
+
+    def _run_compare(self) -> None:
+        left = self._snaps[self.left_combo.currentIndex()]
+        right = self._snaps[self.right_combo.currentIndex()]
+        left_lines = self._serialize(left)
+        right_lines = self._serialize(right)
+        diff = difflib.unified_diff(
+            left_lines,
+            right_lines,
+            fromfile="Snapshot A",
+            tofile="Snapshot B",
+            lineterm="",
+        )
+        self.diff_view.setText("\n".join(diff))
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -689,16 +897,39 @@ class SettingsDialog(QtWidgets.QDialog):
         self.capture_recent = QtWidgets.QCheckBox("Capture recent files")
         self.capture_processes = QtWidgets.QCheckBox("Capture running processes")
         self.capture_running_apps = QtWidgets.QCheckBox("Capture running apps (taskbar)")
+        self.capture_note = QtWidgets.QCheckBox("Capture note")
+        self.capture_todos = QtWidgets.QCheckBox("Capture TODOs")
         self.capture_recent.setToolTip("최근 변경 파일 경로를 스냅샷에 저장합니다.")
         self.capture_processes.setToolTip("필터된 프로세스 목록을 스냅샷에 저장합니다.")
         self.capture_running_apps.setToolTip("작업표시줄에 보이는 앱(최상위 창)을 스냅샷에 저장합니다.")
         self.capture_recent.setChecked(bool(capture.get("recent_files", True)))
         self.capture_processes.setChecked(bool(capture.get("processes", True)))
         self.capture_running_apps.setChecked(bool(capture.get("running_apps", True)))
+        self.capture_note.setChecked(bool(settings.get("capture_note", True)))
+        self.capture_todos.setChecked(bool(settings.get("capture_todos", True)))
         self.exclude_dirs = QtWidgets.QLineEdit()
         self.exclude_dirs.setPlaceholderText("Excluded folders (comma-separated)")
         self.exclude_dirs.setText(", ".join(settings.get("recent_files_exclude", [])))
         self.exclude_dirs.setToolTip("예: .git, node_modules, venv, **/dist/** 같은 패턴을 쉼표로 구분해 입력")
+        self.include_patterns = QtWidgets.QLineEdit()
+        self.include_patterns.setPlaceholderText("Include patterns (comma-separated, optional)")
+        self.include_patterns.setText(", ".join(settings.get("recent_files_include", [])))
+        self.exclude_patterns = QtWidgets.QLineEdit()
+        self.exclude_patterns.setPlaceholderText("Exclude patterns (comma-separated, optional)")
+        self.exclude_patterns.setText(", ".join(settings.get("recent_files_exclude_patterns", [])))
+        self.process_keywords = QtWidgets.QLineEdit()
+        self.process_keywords.setPlaceholderText("Process keywords (comma-separated)")
+        self.process_keywords.setText(", ".join(settings.get("process_keywords", [])))
+        self.archive_after_days = QtWidgets.QSpinBox()
+        self.archive_after_days.setRange(0, 3650)
+        self.archive_after_days.setValue(int(settings.get("archive_after_days", 0)))
+        self.archive_after_days.setSuffix(" days")
+        self.archive_skip_pinned = QtWidgets.QCheckBox("Skip pinned snapshots when auto-archiving")
+        self.archive_skip_pinned.setChecked(bool(settings.get("archive_skip_pinned", True)))
+        self.auto_backup_hours = QtWidgets.QSpinBox()
+        self.auto_backup_hours.setRange(0, 168)
+        self.auto_backup_hours.setValue(int(settings.get("auto_backup_hours", 0)))
+        self.auto_backup_hours.setSuffix(" hours")
         rf_row = QtWidgets.QHBoxLayout()
         rf_row.addWidget(QtWidgets.QLabel("Recent files to capture"))
         rf_row.addStretch(1)
@@ -721,6 +952,20 @@ class SettingsDialog(QtWidgets.QDialog):
         capture_row.addWidget(self.capture_recent)
         capture_row.addWidget(self.capture_processes)
         capture_row.addWidget(self.capture_running_apps)
+        capture_row.addWidget(self.capture_note)
+        capture_row.addWidget(self.capture_todos)
+        process_row = QtWidgets.QHBoxLayout()
+        process_row.addWidget(QtWidgets.QLabel("Process keywords"))
+        process_row.addStretch(1)
+        process_row.addWidget(self.process_keywords)
+        archive_row = QtWidgets.QHBoxLayout()
+        archive_row.addWidget(QtWidgets.QLabel("Auto-archive after"))
+        archive_row.addStretch(1)
+        archive_row.addWidget(self.archive_after_days)
+        backup_row = QtWidgets.QHBoxLayout()
+        backup_row.addWidget(QtWidgets.QLabel("Auto backup interval"))
+        backup_row.addStretch(1)
+        backup_row.addWidget(self.auto_backup_hours)
         general_hint = QtWidgets.QLabel(
             "최근 파일 목록은 ‘어디까지 했지?’를 빠르게 떠올리게 해줍니다. 너무 크면 속도가 느려질 수 있어요."
         )
@@ -730,10 +975,18 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addLayout(capture_row)
         general_layout.addLayout(scan_row)
         general_layout.addLayout(page_row)
+        general_layout.addLayout(process_row)
+        general_layout.addLayout(archive_row)
+        general_layout.addWidget(self.archive_skip_pinned)
+        general_layout.addLayout(backup_row)
         general_layout.addLayout(auto_row)
         general_layout.addWidget(self.auto_snapshot_on_git)
         general_layout.addWidget(QtWidgets.QLabel("Exclude folders for recent file scan"))
         general_layout.addWidget(self.exclude_dirs)
+        general_layout.addWidget(QtWidgets.QLabel("Include patterns for recent file scan"))
+        general_layout.addWidget(self.include_patterns)
+        general_layout.addWidget(QtWidgets.QLabel("Exclude patterns for recent file scan"))
+        general_layout.addWidget(self.exclude_patterns)
         privacy_hint = QtWidgets.QLabel(
             "스냅샷에는 파일 경로, 프로세스, 실행 앱 정보가 저장될 수 있습니다. 필요한 항목만 캡처하세요."
         )
@@ -771,7 +1024,50 @@ class SettingsDialog(QtWidgets.QDialog):
         tags_layout = QtWidgets.QVBoxLayout(tags_page)
         tags_layout.addWidget(tags_box)
         tags_layout.addWidget(tags_hint)
-        tags_layout.addStretch(1)        # --- Backup tab (export/import) ---
+        tags_layout.addStretch(1)
+
+        # --- Templates tab ---
+        templates_page = QtWidgets.QWidget()
+        self.templates_list = QtWidgets.QListWidget()
+        self.templates_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.template_name = QtWidgets.QLineEdit()
+        self.template_name.setPlaceholderText("Template name")
+        self.template_note = QtWidgets.QTextEdit()
+        self.template_note.setPlaceholderText("Template note")
+        self.template_todo1 = QtWidgets.QLineEdit()
+        self.template_todo2 = QtWidgets.QLineEdit()
+        self.template_todo3 = QtWidgets.QLineEdit()
+        for t in (self.template_todo1, self.template_todo2, self.template_todo3):
+            t.setPlaceholderText("Template TODO")
+        self.template_tags = QtWidgets.QLineEdit()
+        self.template_tags.setPlaceholderText("Tags (comma-separated)")
+        self.btn_template_add = QtWidgets.QPushButton("Add / Update")
+        self.btn_template_remove = QtWidgets.QPushButton("Remove")
+        self.btn_template_add.clicked.connect(self.add_or_update_template)
+        self.btn_template_remove.clicked.connect(self.remove_template)
+        self.templates_list.currentRowChanged.connect(self.load_template_to_form)
+
+        template_form = QtWidgets.QFormLayout()
+        template_form.addRow("Name", self.template_name)
+        template_form.addRow("Note", self.template_note)
+        template_form.addRow("TODO 1", self.template_todo1)
+        template_form.addRow("TODO 2", self.template_todo2)
+        template_form.addRow("TODO 3", self.template_todo3)
+        template_form.addRow("Tags", self.template_tags)
+
+        template_btns = QtWidgets.QHBoxLayout()
+        template_btns.addWidget(self.btn_template_add)
+        template_btns.addWidget(self.btn_template_remove)
+
+        templates_layout = QtWidgets.QVBoxLayout(templates_page)
+        templates_layout.addWidget(self.templates_list, 1)
+        templates_layout.addLayout(template_form)
+        templates_layout.addLayout(template_btns)
+
+        self._templates_cache = []
+        self._load_templates(settings.get("templates", []))
+
+        # --- Backup tab (export/import) ---
         backup_page = QtWidgets.QWidget()
         b_title = QtWidgets.QLabel("Backup / Restore")
         b_title.setObjectName("TitleLabel")
@@ -824,6 +1120,7 @@ class SettingsDialog(QtWidgets.QDialog):
         tabs.addTab(restore_page, "Restore")
         tabs.addTab(hotkey_page, "Hotkey")
         tabs.addTab(tags_page, "Tags")
+        tabs.addTab(templates_page, "Templates")
         tabs.addTab(backup_page, "Backup")
 
         # Buttons
@@ -912,8 +1209,6 @@ class SettingsDialog(QtWidgets.QDialog):
         """Apply a settings dict to UI controls (does not save to disk here)."""
         settings = migrate_settings(settings)
         self._settings = settings
-        self._index_path = index_path
-        self._snaps_dir = snaps_dir
         self._imported_payload = None
         self._import_apply_now = False
 
@@ -946,11 +1241,20 @@ class SettingsDialog(QtWidgets.QDialog):
         self.capture_recent.setChecked(bool(capture.get("recent_files", True)))
         self.capture_processes.setChecked(bool(capture.get("processes", True)))
         self.capture_running_apps.setChecked(bool(capture.get("running_apps", True)))
+        self.capture_note.setChecked(bool(settings.get("capture_note", True)))
+        self.capture_todos.setChecked(bool(settings.get("capture_todos", True)))
         self.exclude_dirs.setText(", ".join(settings.get("recent_files_exclude", [])))
+        self.include_patterns.setText(", ".join(settings.get("recent_files_include", [])))
+        self.exclude_patterns.setText(", ".join(settings.get("recent_files_exclude_patterns", [])))
+        self.process_keywords.setText(", ".join(settings.get("process_keywords", [])))
+        self.archive_after_days.setValue(int(settings.get("archive_after_days", 0)))
+        self.archive_skip_pinned.setChecked(bool(settings.get("archive_skip_pinned", True)))
+        self.auto_backup_hours.setValue(int(settings.get("auto_backup_hours", 0)))
 
         self.tags_list.clear()
         for t in (settings.get("tags") or DEFAULT_TAGS):
             self.tags_list.addItem(t)
+        self._load_templates(settings.get("templates", []))
 
     def add_tag(self):
         t = self.tag_input.text().strip()
@@ -967,6 +1271,59 @@ class SettingsDialog(QtWidgets.QDialog):
         row = self.tags_list.currentRow()
         if row >= 0:
             self.tags_list.takeItem(row)
+
+    def _load_templates(self, templates: List[Dict[str, Any]]) -> None:
+        self._templates_cache = templates or []
+        self.templates_list.clear()
+        for tmpl in self._templates_cache:
+            name = str(tmpl.get("name", "")).strip() or "Untitled"
+            self.templates_list.addItem(name)
+        self.template_name.clear()
+        self.template_note.clear()
+        self.template_todo1.clear()
+        self.template_todo2.clear()
+        self.template_todo3.clear()
+        self.template_tags.clear()
+
+    def load_template_to_form(self, row: int) -> None:
+        if row < 0 or row >= len(self._templates_cache):
+            return
+        tmpl = self._templates_cache[row]
+        self.template_name.setText(str(tmpl.get("name", "")))
+        self.template_note.setText(str(tmpl.get("note", "")))
+        todos = tmpl.get("todos", []) or []
+        self.template_todo1.setText(str(todos[0]) if len(todos) > 0 else "")
+        self.template_todo2.setText(str(todos[1]) if len(todos) > 1 else "")
+        self.template_todo3.setText(str(todos[2]) if len(todos) > 2 else "")
+        self.template_tags.setText(", ".join(tmpl.get("tags", []) or []))
+
+    def add_or_update_template(self) -> None:
+        name = self.template_name.text().strip() or "Untitled"
+        tmpl = {
+            "name": name,
+            "note": self.template_note.toPlainText().strip(),
+            "todos": [
+                self.template_todo1.text().strip(),
+                self.template_todo2.text().strip(),
+                self.template_todo3.text().strip(),
+            ],
+            "tags": [t.strip() for t in self.template_tags.text().split(",") if t.strip()],
+        }
+        row = self.templates_list.currentRow()
+        if row >= 0 and row < len(self._templates_cache):
+            self._templates_cache[row] = tmpl
+            self.templates_list.item(row).setText(name)
+        else:
+            self._templates_cache.append(tmpl)
+            self.templates_list.addItem(name)
+            self.templates_list.setCurrentRow(len(self._templates_cache) - 1)
+
+    def remove_template(self) -> None:
+        row = self.templates_list.currentRow()
+        if row < 0 or row >= len(self._templates_cache):
+            return
+        self._templates_cache.pop(row)
+        self.templates_list.takeItem(row)
 
     def imported_payload(self):
         return self._imported_payload
@@ -1004,10 +1361,25 @@ class SettingsDialog(QtWidgets.QDialog):
                 "processes": bool(self.capture_processes.isChecked()),
                 "running_apps": bool(self.capture_running_apps.isChecked()),
             },
+            "capture_note": bool(self.capture_note.isChecked()),
+            "capture_todos": bool(self.capture_todos.isChecked()),
             "recent_files_scan_limit": int(self.scan_limit_spin.value()),
             "recent_files_scan_seconds": float(self.scan_seconds_spin.value()),
             "recent_files_background": bool(self.background_recent.isChecked()),
             "list_page_size": int(self.page_size_spin.value()),
+            "recent_files_include": [
+                part.strip() for part in self.include_patterns.text().split(",") if part.strip()
+            ],
+            "recent_files_exclude_patterns": [
+                part.strip() for part in self.exclude_patterns.text().split(",") if part.strip()
+            ],
+            "process_keywords": [
+                part.strip() for part in self.process_keywords.text().split(",") if part.strip()
+            ],
+            "archive_after_days": int(self.archive_after_days.value()),
+            "archive_skip_pinned": bool(self.archive_skip_pinned.isChecked()),
+            "auto_backup_hours": int(self.auto_backup_hours.value()),
+            "templates": self._templates_cache,
             "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
             "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
             "recent_files_exclude": [
@@ -1195,12 +1567,15 @@ class MainWindow(QtWidgets.QMainWindow):
         a_export_snap.triggered.connect(self.export_selected_snapshot)
         a_report = QtGui.QAction("Export Weekly Report…", self)
         a_report.triggered.connect(self.export_weekly_report)
+        a_compare = QtGui.QAction("Compare Snapshots…", self)
+        a_compare.triggered.connect(self.open_compare_dialog)
         a_history = QtGui.QAction("Open Restore History", self)
         a_history.triggered.connect(self.open_restore_history)
         m_tools.addAction(a_settings)
         m_tools.addSeparator()
         m_tools.addAction(a_export_snap)
         m_tools.addAction(a_report)
+        m_tools.addAction(a_compare)
         m_tools.addSeparator()
         m_tools.addAction(a_history)
 
@@ -1258,6 +1633,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if changed:
             save_json(self.index_path, self.index)
 
+        self._apply_archive_policy()
+
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
@@ -1313,6 +1690,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_restore = QtWidgets.QPushButton("Restore")
         btn_pin = QtWidgets.QPushButton("Pin / Unpin")
         btn_archive = QtWidgets.QPushButton("Archive / Unarchive")
+        btn_compare = QtWidgets.QPushButton("Compare")
         btn_restore_last = QtWidgets.QPushButton("Restore Last")
         btn_open_root = QtWidgets.QPushButton("Open Root Folder")
         btn_open_vscode = QtWidgets.QPushButton("Open in VSCode")
@@ -1328,6 +1706,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_delete.clicked.connect(self.delete_selected)
         btn_pin.clicked.connect(self.toggle_pin)
         btn_archive.clicked.connect(self.toggle_archive)
+        btn_compare.clicked.connect(self.open_compare_dialog)
 
         left = QtWidgets.QVBoxLayout()
         search_row = QtWidgets.QHBoxLayout()
@@ -1378,6 +1757,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_btns2.addStretch(1)
         right_btns2.addWidget(btn_pin)
         right_btns2.addWidget(btn_archive)
+        right_btns2.addWidget(btn_compare)
         right_btns2.addWidget(btn_delete)
         right_btns2.addWidget(btn_restore_last)
         right_btns2.addWidget(btn_restore)
@@ -1406,11 +1786,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.auto_timer = QtCore.QTimer(self)
         self.auto_timer.timeout.connect(self._auto_snapshot_prompt)
+        self.backup_timer = QtCore.QTimer(self)
+        self.backup_timer.timeout.connect(self._run_scheduled_backup)
         self.git_timer = QtCore.QTimer(self)
         self.git_timer.setInterval(60_000)
         self.git_timer.timeout.connect(self._check_git_change)
         self._last_git_state = None
         self._update_auto_snapshot_timer()
+        self._update_backup_timer()
         self.git_timer.start()
         self._recent_workers: Dict[str, QtCore.QThread] = {}
 
@@ -1431,6 +1814,61 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.auto_timer.isActive():
             self.auto_timer.start()
 
+    def _update_backup_timer(self) -> None:
+        hours = int(self.settings.get("auto_backup_hours", 0))
+        if hours <= 0:
+            self.backup_timer.stop()
+            return
+        self.backup_timer.setInterval(hours * 60_000 * 60)
+        if not self.backup_timer.isActive():
+            self.backup_timer.start()
+
+    def _run_scheduled_backup(self) -> None:
+        hours = int(self.settings.get("auto_backup_hours", 0))
+        if hours <= 0:
+            return
+        last = self.settings.get("auto_backup_last", "")
+        if last:
+            try:
+                last_dt = datetime.strptime(last, "%Y-%m-%dT%H:%M:%S")
+                if datetime.now() - last_dt < timedelta(hours=hours):
+                    return
+            except Exception:
+                pass
+        bkp = self._auto_backup_current()
+        self.settings["auto_backup_last"] = now_iso()
+        save_json(self.settings_path, self.settings)
+        self.statusBar().showMessage(f"Auto backup created: {bkp.name}", 3500)
+
+    def _apply_archive_policy(self) -> None:
+        days = int(self.settings.get("archive_after_days", 0))
+        if days <= 0:
+            return
+        skip_pinned = bool(self.settings.get("archive_skip_pinned", True))
+        cutoff = datetime.now() - timedelta(days=days)
+        updated = False
+        for it in self.index.get("snapshots", []):
+            if skip_pinned and bool(it.get("pinned", False)):
+                continue
+            if bool(it.get("archived", False)):
+                continue
+            try:
+                created_at = datetime.strptime(it.get("created_at", ""), "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                continue
+            if created_at >= cutoff:
+                continue
+            it["archived"] = True
+            sid = it.get("id")
+            if sid:
+                snap = self.load_snapshot(sid)
+                if snap:
+                    snap["archived"] = True
+                    self.snap_path(sid).write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+            updated = True
+        if updated:
+            save_json(self.index_path, self.index)
+
     def _check_git_change(self) -> None:
         if not bool(self.settings.get("auto_snapshot_on_git_change", False)):
             return
@@ -1448,6 +1886,8 @@ class MainWindow(QtWidgets.QMainWindow):
             root,
             limit=int(self.settings.get("recent_files_limit", 30)),
             exclude_dirs=self.settings.get("recent_files_exclude", []),
+            include_patterns=self.settings.get("recent_files_include", []),
+            exclude_patterns=self.settings.get("recent_files_exclude_patterns", []),
             scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
             scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
         )
@@ -1712,14 +2152,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ----- actions -----
     def new_snapshot(self) -> None:
-        dlg = SnapshotDialog(self, self.settings.get("default_root", str(Path.home())), self.settings.get("tags", DEFAULT_TAGS))
+        dlg = SnapshotDialog(
+            self,
+            self.settings.get("default_root", str(Path.home())),
+            self.settings.get("tags", DEFAULT_TAGS),
+            self.settings.get("templates", []),
+        )
         if dlg.exec() != QtWidgets.QDialog.Accepted:
             return
         v = dlg.values()
         self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
 
     def quick_snapshot(self) -> None:
-        dlg = SnapshotDialog(self, self.settings.get("default_root", str(Path.home())), self.settings.get("tags", DEFAULT_TAGS))
+        dlg = SnapshotDialog(
+            self,
+            self.settings.get("default_root", str(Path.home())),
+            self.settings.get("tags", DEFAULT_TAGS),
+            self.settings.get("templates", []),
+        )
         dlg.setWindowTitle(f"Quick Snapshot ({self.hotkey_label()})")
         if dlg.exec() != QtWidgets.QDialog.Accepted:
             return
@@ -1739,6 +2189,8 @@ class MainWindow(QtWidgets.QMainWindow):
         capture_recent = bool(capture.get("recent_files", True))
         capture_processes = bool(capture.get("processes", True))
         capture_running_apps = bool(capture.get("running_apps", True))
+        capture_note = bool(self.settings.get("capture_note", True))
+        capture_todos = bool(self.settings.get("capture_todos", True))
         background_recent = bool(self.settings.get("recent_files_background", False))
         recent_files: List[str] = []
         if capture_recent and not background_recent:
@@ -1746,22 +2198,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 root_path,
                 limit=int(self.settings.get("recent_files_limit", 30)),
                 exclude_dirs=self.settings.get("recent_files_exclude", []),
+                include_patterns=self.settings.get("recent_files_include", []),
+                exclude_patterns=self.settings.get("recent_files_exclude_patterns", []),
                 scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
                 scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
             )
+        snapshot_note = note if capture_note else ""
+        snapshot_todos = todos[:3] if capture_todos else ["", "", ""]
+        process_keywords = self.settings.get("process_keywords", [])
         snap = Snapshot(
             id=sid,
             title=title,
             created_at=now_iso(),
             root=str(root_path),
             vscode_workspace=ws,
-            note=note,
-            todos=todos[:3],
+            note=snapshot_note,
+            todos=snapshot_todos,
             tags=tags,
             pinned=False,
             archived=False,
             recent_files=recent_files,
-            processes=list_processes_filtered() if capture_processes else [],
+            processes=list_processes_filtered(process_keywords) if capture_processes else [],
             running_apps=list_running_apps() if capture_running_apps else [],
         )
         self.save_snapshot(snap)
@@ -1852,6 +2309,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if callable(self.on_settings_applied):
             self.on_settings_applied()
         self._update_auto_snapshot_timer()
+        self._update_backup_timer()
+        self._apply_archive_policy()
 
     def _auto_backup_current(self) -> Path:
         backups = app_dir() / "backups"
@@ -2045,12 +2504,32 @@ class MainWindow(QtWidgets.QMainWindow):
         Path(path).write_text("\n".join(lines), encoding="utf-8")
         self.statusBar().showMessage("Weekly report exported.", 2500)
 
+    def open_compare_dialog(self) -> None:
+        snapshots = []
+        for it in self.index.get("snapshots", []):
+            sid = it.get("id")
+            if not sid:
+                continue
+            snap = self.load_snapshot(sid)
+            if snap:
+                snapshots.append(snap)
+        if len(snapshots) < 2:
+            QtWidgets.QMessageBox.information(self, "Compare", "Need at least two snapshots to compare.")
+            return
+        dlg = CompareDialog(self, snapshots)
+        dlg.exec()
+
     def open_restore_history(self) -> None:
         history_path = app_dir() / "restore_history.json"
-        if history_path.exists():
-            open_folder(history_path.parent)
-        else:
+        if not history_path.exists():
             QtWidgets.QMessageBox.information(self, "Restore history", "No restore history yet.")
+            return
+        try:
+            history = json.loads(history_path.read_text(encoding="utf-8"))
+        except Exception:
+            history = {"restores": []}
+        dlg = RestoreHistoryDialog(self, history)
+        dlg.exec()
 
     def restore_last(self) -> None:
         items = self.index.get("snapshots", [])
@@ -2143,11 +2622,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if show_checklist:
             todos = snap.get("todos", [])
             if any(todos):
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Checklist",
-                    "복원 후 체크리스트:\n" + "\n".join([f"- {t}" for t in todos if t]),
-                )
+                dlg = ChecklistDialog(self, [t for t in todos if t])
+                dlg.exec()
         self.statusBar().showMessage("Restore triggered.", 2500)
 
     def delete_selected(self) -> None:
