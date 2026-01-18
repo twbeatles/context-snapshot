@@ -149,9 +149,9 @@ def list_running_apps() -> List[Dict[str, object]]:
     return results
 
 
-def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidgets.QWidget] = None) -> None:
+def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidgets.QWidget] = None) -> List[str]:
     if not apps:
-        return
+        return []
     running: set[str] = set()
     failures: List[str] = []
     for proc in psutil.process_iter(attrs=["exe"]):
@@ -191,6 +191,7 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
             "Restore apps",
             "일부 앱을 다시 실행하지 못했습니다:\n" + "\n".join(sorted(set(failures))),
         )
+    return failures
 
 
 def build_search_blob(snap: Dict[str, object]) -> str:
