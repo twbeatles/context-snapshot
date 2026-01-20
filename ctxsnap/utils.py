@@ -5,6 +5,8 @@ import fnmatch
 import logging
 import os
 import subprocess
+import shutil
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,10 +15,17 @@ from typing import Dict, List, Optional, Tuple
 import psutil
 from PySide6 import QtWidgets
 
-from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS
+from ctxsnap.constants import APP_NAME, DEFAULT_PROCESS_KEYWORDS
+from ctxsnap.i18n import tr
 
-APP_NAME = "ctxsnap"
 LOGGER = logging.getLogger(APP_NAME)
+
+
+def resource_path(relative_path: str) -> Path:
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent.parent / relative_path
 
 
 def safe_parse_datetime(s: str) -> Optional[datetime]:
@@ -38,63 +47,100 @@ def recent_files_under(
     scan_limit: int = 20000,
     scan_seconds: float = 2.0,
 ) -> List[str]:
-    if not root.exists() or not root.is_dir():
-        LOGGER.warning("Recent file scan root invalid: %s", root)
+    if not root.exists():
         return []
-    exclude = {d.lower() for d in (exclude_dirs or [])}
+
+    exclude_dirs_set = {d.lower() for d in (exclude_dirs or [])}
     include_globs = [p.lower() for p in (include_patterns or []) if p.strip()]
     exclude_globs = [p.lower() for p in (exclude_patterns or []) if p.strip()]
+
     files: List[Tuple[float, Path]] = []
-    start = time.monotonic()
-    scanned = 0
+    start_time = time.monotonic()
+    scanned_count = 0
     truncated_reason: Optional[str] = None
-    for base, dirs, filenames in os.walk(root):
-        base_path = Path(base)
-        if any(part.startswith(".") for part in base_path.parts):
-            dirs[:] = []
-            continue
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith(".") and d.lower() not in exclude
-        ]
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            p = base_path / name
-            try:
-                if any(part.lower() in exclude for part in p.parts):
-                    continue
-                path_str = p.as_posix().lower()
-                if exclude and any(fnmatch.fnmatch(path_str, f"*{pattern.lower()}*") for pattern in exclude):
-                    continue
-                if exclude_globs and any(fnmatch.fnmatch(path_str, pat) for pat in exclude_globs):
-                    continue
-                if include_globs and not any(fnmatch.fnmatch(path_str, pat) for pat in include_globs):
-                    continue
-                st = p.stat()
-                files.append((st.st_mtime, p))
-                scanned += 1
-                if scanned >= scan_limit:
-                    truncated_reason = "scan_limit"
-                    dirs[:] = []
-                    break
-                if time.monotonic() - start >= scan_seconds:
-                    truncated_reason = "scan_seconds"
-                    dirs[:] = []
-                    break
-            except (PermissionError, FileNotFoundError):
-                continue
+
+    # Stack-based recursive scan (iterative) to avoid recursion depth limits
+    # Stack items: (Path object)
+    stack = [root]
+
+    while stack:
         if truncated_reason:
             break
+            
+        current_dir = stack.pop()
+        
+        try:
+            # os.scandir is faster than Path.iterdir or rglob as it yields DirEntry objects with cached stat
+            with os.scandir(current_dir) as entries:
+                for entry in entries:
+                    if truncated_reason:
+                        break
+
+                    # Check limits
+                    if scanned_count >= scan_limit:
+                        truncated_reason = "scan_limit"
+                        break
+                    if time.monotonic() - start_time >= scan_seconds:
+                        truncated_reason = "scan_seconds"
+                        break
+
+                    entry_name_lower = entry.name.lower()
+
+                    # 1. Directory handling (Pruning)
+                    if entry.is_dir(follow_symlinks=False):
+                        # Skip hidden dirs if implicit rule (checking "." prefix)
+                        if entry.name.startswith("."):
+                            continue
+                        # Skip excluded dirs
+                        if entry_name_lower in exclude_dirs_set:
+                            continue
+                        # Skip if dir matches exclude patterns (broad check)
+                        # (Optimized: Checking directory name against globs might be aggressive, 
+                        # but standard usage usually implies excluding folder names)
+                        if exclude_globs and any(fnmatch.fnmatch(entry_name_lower, pat) for pat in exclude_globs):
+                            continue
+                        
+                        stack.append(Path(entry.path))
+                        continue
+                    
+                    # 2. File handling
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+
+                    # Skip hidden files
+                    if entry.name.startswith("."):
+                        continue
+                    
+                    scanned_count += 1
+                    
+                    # File-level Excludes
+                    if exclude_globs and any(fnmatch.fnmatch(entry_name_lower, pat) for pat in exclude_globs):
+                        continue
+                        
+                    # File-level Includes (if specified, must match at least one)
+                    if include_globs and not any(fnmatch.fnmatch(entry_name_lower, pat) for pat in include_globs):
+                        continue
+
+                    try:
+                        # entry.stat() is cached on Windows for os.scandir
+                        mtime = entry.stat().st_mtime
+                        files.append((mtime, Path(entry.path)))
+                    except OSError:
+                        pass
+                        
+        except (PermissionError, OSError):
+            continue
+
     if truncated_reason:
         LOGGER.info(
             "Recent file scan truncated (%s): root=%s scanned=%s limit=%s seconds=%.2f",
             truncated_reason,
             root,
-            scanned,
+            scanned_count,
             scan_limit,
             scan_seconds,
         )
+
     files.sort(key=lambda x: x[0], reverse=True)
     return [str(p.resolve()) for _, p in files[:limit]]
 
@@ -128,11 +174,7 @@ def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Dict[s
 
 
 def list_running_apps() -> List[Dict[str, object]]:
-    try:
-        user32 = ctypes.windll.user32
-    except (AttributeError, OSError) as exc:
-        LOGGER.warning("Windows APIs unavailable for running app scan: %s", exc)
-        return []
+    user32 = ctypes.windll.user32
     get_window_text_length = user32.GetWindowTextLengthW
     get_window_text = user32.GetWindowTextW
     is_window_visible = user32.IsWindowVisible
@@ -197,13 +239,7 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
             continue
     for app in apps:
         exe = str(app.get("exe") or "").strip()
-        raw_cmdline = app.get("cmdline")
-        if isinstance(raw_cmdline, (list, tuple)):
-            cmdline = list(raw_cmdline)
-        elif raw_cmdline:
-            cmdline = [str(raw_cmdline)]
-        else:
-            cmdline = []
+        cmdline = app.get("cmdline") or []
         exe_lower = exe.lower() if exe else ""
         if exe_lower and exe_lower in running:
             continue
@@ -228,8 +264,8 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
     if failures:
         QtWidgets.QMessageBox.information(
             parent,
-            "Restore apps",
-            "일부 앱을 다시 실행하지 못했습니다:\n" + "\n".join(sorted(set(failures))),
+            tr("Restore"),
+            tr("Failed to restore some apps") + ":\n" + "\n".join(sorted(set(failures))),
         )
     return failures
 
@@ -245,8 +281,46 @@ def build_search_blob(snap: Dict[str, object]) -> str:
     return " ".join(p for p in parts if p).lower()
 
 
+
 def snapshot_mtime(path: Path) -> float:
     try:
         return path.stat().st_mtime
     except (FileNotFoundError, PermissionError):
         return 0.0
+
+
+def git_title_suggestion(root: Path) -> Optional[str]:
+    git = shutil.which("git")
+    if not git:
+        return None
+    if not (root / ".git").exists():
+        return None
+    try:
+        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True).strip()
+        return f"{root.name} [{branch}] - {subj}"
+    except Exception as e:
+        LOGGER.debug("Git title suggestion failed: %s", e)
+        return None
+
+
+def git_state(root: Path) -> Optional[Tuple[str, str]]:
+    git = shutil.which("git")
+    if not git:
+        return None
+    if not (root / ".git").exists():
+        return None
+    try:
+        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, timeout=5).strip()
+        sha = subprocess.check_output([git, "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=5).strip()
+        return branch, sha
+    except Exception as e:
+        LOGGER.debug("Git state check failed: %s", e)
+        return None
+
+
+def log_exc(context: str, e: Exception) -> None:
+    try:
+        LOGGER.exception("%s: %s", context, e)
+    except Exception:
+        pass

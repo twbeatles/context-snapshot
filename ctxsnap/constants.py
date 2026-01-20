@@ -1,3 +1,5 @@
+APP_NAME = "ctxsnap"
+
 DEFAULT_TAGS = ["업무", "개인", "부동산", "정산"]
 
 DEFAULT_PROCESS_KEYWORDS = [

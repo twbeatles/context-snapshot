@@ -9,9 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ctxsnap.constants import DEFAULT_PROCESS_KEYWORDS, DEFAULT_TAGS
+from ctxsnap.constants import APP_NAME, DEFAULT_PROCESS_KEYWORDS, DEFAULT_TAGS
 
-APP_NAME = "ctxsnap"
 LOGGER = logging.getLogger(APP_NAME)
 
 
@@ -122,8 +121,8 @@ def load_json(p: Path, default: Optional[Dict[str, Any]] = None) -> Dict[str, An
             if p.exists():
                 p.rename(corrupted_path)
                 LOGGER.info("Corrupted file backed up to %s", corrupted_path)
-        except Exception as exc:
-            LOGGER.warning("Failed to backup corrupted file %s: %s", p, exc)
+        except Exception:
+            pass
         return default.copy()
     except Exception as e:
         LOGGER.exception("Failed to load JSON from %s: %s", p, e)
@@ -151,17 +150,20 @@ def save_json(p: Path, data: Dict[str, Any]) -> bool:
             prefix=p.stem + "_",
             dir=str(p.parent)
         )
+        fd_closed = False
         try:
-            with os.fdopen(fd, "wb") as tmp_file:
-                tmp_file.write(content.encode("utf-8"))
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-            # On Windows, need to remove target first
-            if p.exists():
-                p.unlink()
-            Path(tmp_path).rename(p)
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd_closed = True
+            # os.replace is atomic on both Windows and Unix
+            os.replace(tmp_path, str(p))
             return True
         except Exception as e:
+            if not fd_closed:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             LOGGER.exception("Failed to write temp file %s: %s", tmp_path, e)
             # Clean up temp file
             try:
@@ -321,7 +323,8 @@ def now_iso() -> str:
 
 
 def gen_id() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    import random
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + f"-{random.randint(100, 999)}"
 
 
 def save_snapshot_file(path: Path, snap: Dict[str, Any]) -> bool:
@@ -335,3 +338,4 @@ def save_snapshot_file(path: Path, snap: Dict[str, Any]) -> bool:
         True if save was successful, False otherwise
     """
     return save_json(path, snap)
+

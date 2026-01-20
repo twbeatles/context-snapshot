@@ -7,7 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-APP_NAME = "ctxsnap"
+from ctxsnap.constants import APP_NAME
+
 LOGGER = logging.getLogger(APP_NAME)
 
 
@@ -21,7 +22,6 @@ def open_folder(path: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
-        path = path.expanduser()
         if not path.exists():
             msg = f"Folder does not exist: {path}"
             LOGGER.warning(msg)
@@ -44,7 +44,6 @@ def open_terminal_at(path: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
-        path = path.expanduser()
         if not path.exists():
             msg = f"Path does not exist: {path}"
             LOGGER.warning(msg)
@@ -74,14 +73,25 @@ def open_vscode_at(target: Path) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     try:
-        target = target.expanduser()
         code = shutil.which("code")
         if not code:
-            msg = "'code' command not found in PATH"
+            # Fallback for standard Windows install locations
+            possible_paths = [
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd"),
+                os.path.expandvars(r"%PROGRAMFILES%\Microsoft VS Code\bin\code.cmd"),
+                os.path.expandvars(r"%PROGRAMFILES(x86)%\Microsoft VS Code\bin\code.cmd"),
+            ]
+            for p in possible_paths:
+                if Path(p).exists():
+                    code = p
+                    break
+
+        if not code:
+            msg = "'code' command not found in PATH or standard locations"
             LOGGER.warning(msg)
             return False, msg
         
-        subprocess.Popen([code, str(target)], shell=False)
+        subprocess.Popen([code, str(target)], shell=True)  # shell=True for .cmd execution if needed
         return True, ""
     except Exception as e:
         msg = f"Failed to open VSCode at {target}: {e}"
@@ -112,3 +122,4 @@ def resolve_vscode_target(snap: Dict[str, Any]) -> Path:
             return root_path
     
     return Path.home()
+

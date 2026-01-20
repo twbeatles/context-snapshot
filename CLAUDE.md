@@ -17,14 +17,22 @@
 
 ```
 context-snapshot-main/
-├── ctxsnap_win.py          # 메인 애플리케이션 진입점 (2800+ 줄)
+├── ctxsnap_win.py          # 메인 애플리케이션 진입점
 ├── ctxsnap/                # 핵심 패키지
 │   ├── __init__.py
 │   ├── app_storage.py      # 설정/스냅샷 저장 로직
 │   ├── constants.py        # 상수 정의
+│   ├── i18n.py             # 다국어 처리
 │   ├── restore.py          # 복원 헬퍼
-
-│   └── utils.py            # 유틸리티 함수
+│   ├── utils.py            # 유틸리티 함수
+│   ├── core/               # 핵심 로직 (로깅, 워커)
+│   │   ├── logging.py
+│   │   └── worker.py
+│   └── ui/                 # UI 컴포넌트
+│       ├── dialogs/        # 다이얼로그 모음
+│       ├── main_window.py  # 메인 윈도우
+│       ├── models.py       # 데이터 모델
+│       └── styles.py       # 스타일시트/테마
 ├── assets/                 # 아이콘/이미지
 ├── installer/              # Inno Setup 설치 스크립트
 ├── scripts/                # 유틸리티 스크립트
@@ -54,18 +62,33 @@ context-snapshot-main/
 
 ## 핵심 모듈 설명
 
-### ctxsnap_win.py (메인 애플리케이션)
+### ctxsnap/ui/main_window.py (UI 메인)
 | 클래스/함수 | 역할 |
 |------------|------|
 | `MainWindow` | 메인 UI 윈도우 (검색, 필터, 스냅샷 리스트, 상세 뷰) |
-| `SnapshotDialog` | 스냅샷 생성/편집 다이얼로그 |
-| `SettingsDialog` | 설정 다이얼로그 (General, Restore, Hotkey, Tags, Templates, Backup 탭) |
-| `SnapshotListModel` | 스냅샷 목록 QAbstractListModel |
-| `RecentFilesWorker` | 백그라운드 최근 파일 스캔 QRunnable |
+| `SnapshotListModel` | 스냅샷 목록 필터링/표시 모델 |
+| `git_title_suggestion()` | Git 브랜치 기반 제목 추천 |
+
+### ctxsnap/ui/dialogs/
+| 파일 | 역할 |
+|------|------|
+| `snapshot.py` | 스냅샷 생성/편집 (`SnapshotDialog`) |
+| `settings.py` | 설정창 (`SettingsDialog`) |
+| `onboarding.py` | 첫 실행 가이드 (`OnboardingDialog`) |
+| `history.py` | 복원 기록 (`RestoreHistoryDialog`) |
+| `restore.py` | 복원 미리보기 (`RestorePreviewDialog`) |
+
+### ctxsnap/core/worker.py
+| 클래스 | 역할 |
+|--------|------|
+| `RecentFilesWorker` | 백그라운드 최근 파일 스캔 (QRunnable) |
+
+### ctxsnap/hotkey.py (in ui/)
+| 클래스/함수 | 역할 |
+|-------------|------|
 | `HotkeyFilter` | 글로벌 단축키 이벤트 필터 |
-| `register_hotkey()` / `unregister_hotkey()` | Windows 핫키 등록 |
-| `git_title_suggestion()` | Git 브랜치/커밋 기반 제목 추천 |
-| `git_state()` | Git 상태 해시 (자동 스냅샷용) |
+| `register_hotkey` | Windows API 핫키 등록 |
+
 
 ### ctxsnap/utils.py
 | 함수 | 역할 |
@@ -100,7 +123,8 @@ context-snapshot-main/
 6. **자동 스냅샷**: 주기적 또는 Git 변경 감지 기반
 7. **템플릿**: 자주 쓰는 TODO/태그/메모 템플릿
 8. **스냅샷 비교**: 두 스냅샷 차이 비교
-9. **백업/복원**: 설정 및 스냅샷 데이터 백업
+10. **복원 기록**: 최근 복원 내역 확인 및 재실행
+11. **온보딩 & 다국어**: 첫 사용자 가이드 및 한/영 지원
 
 ---
 
@@ -144,6 +168,10 @@ python -m PyInstaller ctxsnap_win.spec
 - 공통 로직은 `ctxsnap/utils.py`로 분리
 - UI 응답성 유지 (Heavy 작업은 백그라운드 처리)
 - 신규 설정 키는 `migrate_settings()`에 **기본값 추가**
+- 상수는 `ctxsnap/constants.py`에서만 정의 (`APP_NAME` 등)
+- i18n: 모든 사용자 메시지는 `tr()` 함수 사용
+- 파일 쓰기: `os.replace()` 사용으로 원자적 처리
+- subprocess: 타임아웃 필수 (예: `timeout=5`)
 
 ---
 
@@ -194,6 +222,16 @@ python-dotenv (선택)
 - Windows 전용 (ctypes.windll 사용)
 - VSCode `code` 명령이 PATH에 있어야 VSCode 연동 작동
 - 대용량 프로젝트에서 파일 스캔이 느릴 수 있음
+
+---
+
+## 코드 품질 개선 (최신)
+
+- **원자적 파일 쓰기**: `save_json()`이 `os.replace()` 사용
+- **ID 충돌 방지**: `gen_id()`에 랜덤 접미사 추가
+- **예외 처리 강화**: 핫키 필터, 삭제 작업 등
+- **i18n 완성도**: 23개 키 추가, 하드코딩 문자열 제거
+- **Git 타임아웃**: subprocess 호출에 5초 타임아웃 적용
 
 ---
 
