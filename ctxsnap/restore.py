@@ -90,8 +90,14 @@ def open_vscode_at(target: Path) -> Tuple[bool, str]:
             msg = "'code' command not found in PATH or standard locations"
             LOGGER.warning(msg)
             return False, msg
-        
-        subprocess.Popen([code, str(target)], shell=True)  # shell=True for .cmd execution if needed
+
+        code_path = Path(code)
+        target_str = str(target)
+        # If `code` resolves to a .cmd/.bat wrapper, execute it via cmd.exe with shell=False.
+        if code_path.suffix.lower() in {".cmd", ".bat"}:
+            subprocess.Popen(["cmd.exe", "/c", str(code_path), target_str], shell=False)
+        else:
+            subprocess.Popen([str(code_path), target_str], shell=False)
         return True, ""
     except Exception as e:
         msg = f"Failed to open VSCode at {target}: {e}"
@@ -122,4 +128,3 @@ def resolve_vscode_target(snap: Dict[str, Any]) -> Path:
             return root_path
     
     return Path.home()
-

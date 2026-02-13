@@ -250,11 +250,17 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
             elif exe:
                 launch_cmd = [exe]
             if launch_cmd:
-                if launch_cmd[0] and not Path(launch_cmd[0]).exists() and exe:
-                    launch_cmd = [exe]
-                if not Path(launch_cmd[0]).exists():
-                    failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (path missing)")
-                    continue
+                cand0 = str(launch_cmd[0] or "").strip()
+                if cand0 and not Path(cand0).exists():
+                    # Allow restoring apps whose cmdline uses a command name on PATH.
+                    resolved = shutil.which(cand0)
+                    if resolved:
+                        launch_cmd = [resolved, *launch_cmd[1:]]
+                    elif exe and Path(exe).exists():
+                        launch_cmd = [exe]
+                    else:
+                        failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (path missing)")
+                        continue
                 subprocess.Popen(launch_cmd, shell=False)
             else:
                 failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (no command)")
