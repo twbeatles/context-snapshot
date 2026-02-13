@@ -43,6 +43,7 @@ from ctxsnap.ui.styles import NoScrollComboBox
 from ctxsnap.utils import (
     build_search_blob,
     git_state,
+    git_title_suggestion,
     list_processes_filtered,
     list_running_apps,
     log_exc,
@@ -56,6 +57,121 @@ LOGGER = get_logger()
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    def _set_last_snapshot_form_in_memory(
+        self,
+        *,
+        root: str,
+        workspace: str,
+        note: str,
+        todos: List[str],
+        tags: List[str],
+    ) -> None:
+        # Keep this small and stable; used by silent Quick/Auto snapshots.
+        t = (todos or [])[:3]
+        while len(t) < 3:
+            t.append("")
+        self.settings["last_snapshot_form"] = {
+            "root": str(root or self.settings.get("default_root", str(Path.home()))),
+            "vscode_workspace": str(workspace or ""),
+            "note": str(note or ""),
+            "todos": [str(x or "") for x in t],
+            "tags": [str(x).strip() for x in (tags or []) if str(x).strip()],
+        }
+
+    def _dedupe_title(self, root_path: Path, title: str) -> str:
+        existing = {
+            (str(Path(it.get("root", "")).resolve()), str(it.get("title", "")))
+            for it in (self.index.get("snapshots", []) or [])
+            if not bool(it.get("archived", False))
+        }
+        base = title.strip() or f"{root_path.name} - {datetime.now().strftime('%m/%d %H:%M')}"
+        cand = base
+        if (str(root_path.resolve()), cand) not in existing:
+            return cand
+        # Keep appending time until unique.
+        stamp = datetime.now().strftime("%H:%M:%S")
+        cand = f"{base} ({stamp})"
+        if (str(root_path.resolve()), cand) not in existing:
+            return cand
+        for i in range(2, 50):
+            cand2 = f"{base} ({stamp}) #{i}"
+            if (str(root_path.resolve()), cand2) not in existing:
+                return cand2
+        return f"{base} ({datetime.now().strftime('%H%M%S')})"
+
+    def _silent_snapshot(self, *, allow_dialog_fallback: bool, reason: str) -> bool:
+        """Create a snapshot without showing SnapshotDialog.
+
+        If required inputs are missing and allow_dialog_fallback is True, falls back to SnapshotDialog once.
+        Returns True if a snapshot was created.
+        """
+        form = self.settings.get("last_snapshot_form", {}) if isinstance(self.settings.get("last_snapshot_form", {}), dict) else {}
+        root = str(form.get("root") or self.settings.get("default_root", str(Path.home()))).strip()
+        workspace = str(form.get("vscode_workspace") or "").strip()
+        note = str(form.get("note") or "")
+        todos_raw = form.get("todos") if isinstance(form.get("todos"), list) else []
+        todos = [str(x or "").strip() for x in (todos_raw or [])][:3]
+        while len(todos) < 3:
+            todos.append("")
+        tags_raw = form.get("tags") if isinstance(form.get("tags"), list) else []
+        tags = [str(x).strip() for x in (tags_raw or []) if str(x).strip()]
+
+        root_path = Path(root).expanduser()
+        if not root or not root_path.exists():
+            if allow_dialog_fallback:
+                self.statusBar().showMessage(tr("Root invalid"), 3500)
+                self._run_snapshot_dialog(quick=True)
+            else:
+                self.statusBar().showMessage(f"Auto snapshot skipped ({reason}): invalid root.", 3500)
+            return False
+
+        capture_todos = bool(self.settings.get("capture_todos", True))
+        enforce = bool(self.settings.get("capture_enforce_todos", True)) and capture_todos
+        if enforce and any(not t for t in todos):
+            if allow_dialog_fallback:
+                self.statusBar().showMessage(tr("Todos required"), 3500)
+                self._run_snapshot_dialog(quick=True)
+            else:
+                self.statusBar().showMessage(f"Auto snapshot skipped ({reason}): TODOs required.", 3500)
+            return False
+
+        # Validate workspace if set; otherwise let _create_snapshot auto-pick a single workspace under root.
+        if workspace:
+            ws_path = Path(workspace).expanduser()
+            if not ws_path.exists():
+                workspace = ""
+
+        root_resolved = str(root_path.resolve())
+        title = git_title_suggestion(Path(root_resolved)) or f"{Path(root_resolved).name} - {datetime.now().strftime('%m/%d %H:%M')}"
+        title = self._dedupe_title(Path(root_resolved), title)
+
+        self._create_snapshot(
+            root_resolved,
+            title,
+            workspace,
+            note,
+            todos,
+            tags,
+            interactive=False,
+        )
+        return True
+
+    def _run_snapshot_dialog(self, *, quick: bool) -> bool:
+        dlg = SnapshotDialog(
+            self,
+            self.settings.get("default_root", str(Path.home())),
+            self.settings.get("tags", DEFAULT_TAGS),
+            self.settings.get("templates", []),
+            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+        )
+        if quick:
+            dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return False
+        v = dlg.values()
+        self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"], interactive=True)
+        return True
+
     def hotkey_label(self) -> str:
         hk = self.settings.get("hotkey", {})
         parts = []
@@ -462,7 +578,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _auto_snapshot_prompt(self) -> None:
         if int(self.settings.get("auto_snapshot_minutes", 0)) <= 0:
             return
-        self.quick_snapshot()
+        # Auto-snapshot must be silent (no modal dialog).
+        self._silent_snapshot(allow_dialog_fallback=False, reason="auto")
 
     def _update_auto_snapshot_timer(self) -> None:
         minutes = int(self.settings.get("auto_snapshot_minutes", 0))
@@ -549,7 +666,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not state:
             return
         if self._last_git_state and self._last_git_state != state:
-            self.quick_snapshot()
+            # Git-triggered snapshot must be silent (no modal dialog).
+            self._silent_snapshot(allow_dialog_fallback=False, reason="git")
         self._last_git_state = state
 
     def _start_recent_files_scan(self, sid: str, root: Path) -> None:
@@ -905,6 +1023,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Update default_root setting
         self.settings["default_root"] = root
+        self._set_last_snapshot_form_in_memory(
+            root=root,
+            workspace=workspace,
+            note=note,
+            todos=todos,
+            tags=tags,
+        )
         save_json(self.settings_path, self.settings)
         
         # Refresh UI
@@ -912,48 +1037,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self.on_select(self.listw.currentIndex(), QtCore.QModelIndex())
 
     def new_snapshot(self) -> None:
-        dlg = SnapshotDialog(
-            self,
-            self.settings.get("default_root", str(Path.home())),
-            self.settings.get("tags", DEFAULT_TAGS),
-            self.settings.get("templates", []),
-            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
-        )
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
-            return
-        v = dlg.values()
-        self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
+        self._run_snapshot_dialog(quick=False)
 
     def quick_snapshot(self) -> None:
-        dlg = SnapshotDialog(
-            self,
-            self.settings.get("default_root", str(Path.home())),
-            self.settings.get("tags", DEFAULT_TAGS),
-            self.settings.get("templates", []),
-            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
-        )
-        dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
+        # Silent quick snapshot based on last saved form. Falls back to dialog once if needed.
+        self._silent_snapshot(allow_dialog_fallback=True, reason="quick")
 
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
-            return
-        v = dlg.values()
-        self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
-
-    def _create_snapshot(self, root: str, title: str, workspace: str, note: str, todos: List[str], tags: List[str]) -> None:
+    def _create_snapshot(
+        self,
+        root: str,
+        title: str,
+        workspace: str,
+        note: str,
+        todos: List[str],
+        tags: List[str],
+        *,
+        interactive: bool = True,
+    ) -> None:
         root_path = Path(root).resolve()
 
         # Check for duplication (same root and title in active snapshots)
         for it in self.index.get("snapshots", []):
             if not bool(it.get("archived", False)):
                 if it.get("title") == title and Path(it.get("root", "")).resolve() == root_path:
-                    r = QtWidgets.QMessageBox.warning(
-                        self,
-                        tr("Duplicate Snapshot"),
-                        tr("Duplicate snapshot warn"),
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
-                    )
-                    if r != QtWidgets.QMessageBox.Yes:
-                        return
+                    if interactive:
+                        r = QtWidgets.QMessageBox.warning(
+                            self,
+                            tr("Duplicate Snapshot"),
+                            tr("Duplicate snapshot warn"),
+                            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                        )
+                        if r != QtWidgets.QMessageBox.Yes:
+                            return
                     break
         ws = workspace.strip()
         if not ws:
@@ -961,6 +1076,14 @@ class MainWindow(QtWidgets.QMainWindow):
             wss = list(root_path.glob("*.code-workspace"))
             if len(wss) == 1:
                 ws = str(wss[0].resolve())
+        # Persist the last-used snapshot form (for silent Quick/Auto snapshots).
+        self._set_last_snapshot_form_in_memory(
+            root=str(root_path),
+            workspace=ws,
+            note=note,
+            todos=todos,
+            tags=tags,
+        )
         sid = gen_id()
         capture = self.settings.get("capture", {})
         capture_recent = bool(capture.get("recent_files", True))
