@@ -1,5 +1,5 @@
 import locale
-from typing import Dict, Optional
+from typing import Optional
 
 # Global translation dictionary
 TRANSLATIONS = {
@@ -175,9 +175,7 @@ TRANSLATIONS = {
         "Warning": "Warning",
         "Error": "Error",
         "Information": "Information",
-        "Snapshot Created": "Snapshot Created",
         "Snapshot Updated": "Snapshot Updated",
-        "Snapshot Restored": "Snapshot Restored",
         "Failed to restore some apps": "Failed to restore some apps",
         "Failed to delete snapshot file": "Failed to delete snapshot file",
         "Enforce 3 TODOs": "Enforce 3 TODOs",
@@ -400,9 +398,7 @@ TRANSLATIONS = {
         "Warning": "경고",
         "Error": "오류",
         "Information": "알림",
-        "Snapshot Created": "스냅샷이 생성되었습니다",
         "Snapshot Updated": "스냅샷이 수정되었습니다",
-        "Snapshot Restored": "스냅샷이 복원되었습니다",
         "Failed to restore some apps": "일부 앱을 다시 실행하지 못했습니다",
         "Failed to delete snapshot file": "스냅샷 파일 삭제 실패",
         "Enforce 3 TODOs": "TODO 3개 필수 입력",

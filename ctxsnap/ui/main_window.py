@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1239,7 +1238,7 @@ class MainWindow(QtWidgets.QMainWindow):
             msg.setInformativeText("Merge: 기존은 유지하고 새 항목만 추가\nOverwrite: 같은 ID는 덮어쓰기\nReplace all: 현재 스냅샷을 모두 삭제 후 백업으로 교체")
             btn_merge = msg.addButton("Merge", QtWidgets.QMessageBox.AcceptRole)
             btn_overwrite = msg.addButton("Overwrite", QtWidgets.QMessageBox.DestructiveRole)
-            btn_replace = msg.addButton("Replace all", QtWidgets.QMessageBox.DestructiveRole)
+            msg.addButton("Replace all", QtWidgets.QMessageBox.DestructiveRole)
             btn_cancel = msg.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
             msg.exec()
             clicked = msg.clickedButton()

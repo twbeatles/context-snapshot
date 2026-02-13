@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -12,7 +11,6 @@ from ctxsnap.app_storage import (
     migrate_settings,
     save_json,
 )
-from ctxsnap.constants import APP_NAME
 from ctxsnap.core.logging import setup_logging, get_logger
 from ctxsnap.i18n import set_language, tr
 from ctxsnap.restore import open_folder

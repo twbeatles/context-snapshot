@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes
-from ctypes import wintypes
 from PySide6 import QtCore
 
 # -------- Global hotkey (RegisterHotKey) --------

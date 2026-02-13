@@ -16,7 +16,6 @@ from ctxsnap.ui.styles import (
     NoScrollComboBox,
     NoScrollSpinBox,
     NoScrollDoubleSpinBox,
-    disable_wheel_scroll,
 )
 
 
@@ -525,7 +524,7 @@ class SettingsDialog(QtWidgets.QDialog):
             msg.setText(tr("Import Params"))
             msg.setInformativeText(tr("Import Info"))
             btn_apply = msg.addButton("✓ " + tr("Apply now"), QtWidgets.QMessageBox.AcceptRole)
-            btn_keep = msg.addButton(tr("Keep in dialog"), QtWidgets.QMessageBox.RejectRole)
+            msg.addButton(tr("Keep in dialog"), QtWidgets.QMessageBox.RejectRole)
             msg.exec()
             self._import_apply_now = (msg.clickedButton() == btn_apply)
 
