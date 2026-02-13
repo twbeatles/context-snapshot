@@ -118,7 +118,7 @@ def load_json(p: Path, default: Optional[Dict[str, Any]] = None) -> Dict[str, An
         # Try to backup corrupted file
         try:
             # Avoid collisions when the file keeps failing to parse.
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             corrupted_path = p.with_name(f"{p.name}.corrupted.{stamp}.json")
             if p.exists():
                 p.rename(corrupted_path)
