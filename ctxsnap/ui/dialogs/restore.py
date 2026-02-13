@@ -64,6 +64,17 @@ class RestorePreviewDialog(QtWidgets.QDialog):
             item.setData(QtCore.Qt.UserRole, app)
             self.apps_list.addItem(item)
 
+        def _sync_apps_enabled() -> None:
+            enabled = bool(self.cb_running_apps.isChecked())
+            self.apps_list.setEnabled(enabled)
+            # Bulk check/uncheck for a predictable UX
+            for i in range(self.apps_list.count()):
+                it = self.apps_list.item(i)
+                it.setCheckState(QtCore.Qt.Checked if enabled else QtCore.Qt.Unchecked)
+
+        self.cb_running_apps.stateChanged.connect(lambda _state: _sync_apps_enabled())
+        _sync_apps_enabled()
+
         # Snapshot info display
         info = QtWidgets.QTextEdit()
         info.setReadOnly(True)
@@ -124,6 +135,7 @@ class RestorePreviewDialog(QtWidgets.QDialog):
             "open_terminal": self.cb_terminal.isChecked(),
             "open_vscode": self.cb_vscode.isChecked(),
             "open_running_apps": self.cb_running_apps.isChecked(),
+            # Always include the key; empty list must be respected by caller.
             "running_apps": selected_apps,
         }
 

@@ -1375,7 +1375,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         requested_apps = []
         if ch.get("open_running_apps"):
-            requested_apps = ch.get("running_apps") or snap.get("running_apps", [])
+            # Respect the user's explicit selection (empty list means "none").
+            requested_apps = ch.get("running_apps", [])
             running_app_failures = restore_running_apps(requested_apps, parent=self)
         else:
             running_app_failures = []
