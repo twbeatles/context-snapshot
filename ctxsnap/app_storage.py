@@ -117,7 +117,9 @@ def load_json(p: Path, default: Optional[Dict[str, Any]] = None) -> Dict[str, An
         LOGGER.exception("JSON decode error in %s: %s", p, e)
         # Try to backup corrupted file
         try:
-            corrupted_path = p.with_suffix(".corrupted.json")
+            # Avoid collisions when the file keeps failing to parse.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            corrupted_path = p.with_name(f"{p.name}.corrupted.{stamp}.json")
             if p.exists():
                 p.rename(corrupted_path)
                 LOGGER.info("Corrupted file backed up to %s", corrupted_path)
@@ -150,20 +152,20 @@ def save_json(p: Path, data: Dict[str, Any]) -> bool:
             prefix=p.stem + "_",
             dir=str(p.parent)
         )
-        fd_closed = False
         try:
-            os.write(fd, content.encode("utf-8"))
-            os.close(fd)
-            fd_closed = True
+            # Use a file object to guarantee full writes (os.write can be partial).
+            with os.fdopen(fd, "wb") as f:
+                f.write(content.encode("utf-8"))
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    # Some filesystems / environments may not support fsync.
+                    pass
             # os.replace is atomic on both Windows and Unix
             os.replace(tmp_path, str(p))
             return True
         except Exception as e:
-            if not fd_closed:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
             LOGGER.exception("Failed to write temp file %s: %s", tmp_path, e)
             # Clean up temp file
             try:
@@ -214,6 +216,7 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("auto_backup_last", "")
     settings.setdefault("capture_note", True)
     settings.setdefault("capture_todos", True)
+    settings.setdefault("capture_enforce_todos", True)
     settings.setdefault("auto_snapshot_minutes", 0)
     settings.setdefault("auto_snapshot_on_git_change", False)
     settings.setdefault(
@@ -228,6 +231,16 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     )
     # UX
     settings.setdefault("onboarding_shown", False)
+    settings.setdefault(
+        "last_snapshot_form",
+        {
+            "root": settings.get("default_root", str(Path.home())),
+            "vscode_workspace": "",
+            "note": "",
+            "todos": ["", "", ""],
+            "tags": [],
+        },
+    )
     return settings
 
 
@@ -338,4 +351,3 @@ def save_snapshot_file(path: Path, snap: Dict[str, Any]) -> bool:
         True if save was successful, False otherwise
     """
     return save_json(path, snap)
-
