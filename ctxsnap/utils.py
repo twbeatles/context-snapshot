@@ -302,8 +302,16 @@ def git_title_suggestion(root: Path) -> Optional[str]:
     if not (root / ".git").exists():
         return None
     try:
-        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
-        subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True).strip()
+        branch = subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            timeout=3,
+        ).strip()
+        subj = subprocess.check_output(
+            [git, "-C", str(root), "log", "-1", "--pretty=%s"],
+            text=True,
+            timeout=3,
+        ).strip()
         return f"{root.name} [{branch}] - {subj}"
     except Exception as e:
         LOGGER.debug("Git title suggestion failed: %s", e)

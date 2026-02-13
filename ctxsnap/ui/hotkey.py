@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes
+import ctypes.wintypes as wintypes
 from PySide6 import QtCore
 
 # -------- Global hotkey (RegisterHotKey) --------
@@ -20,9 +21,10 @@ class HotkeyFilter(QtCore.QObject, QtCore.QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, eventType, message):
         try:
-            if eventType != "windows_generic_MSG":
+            # Qt may use either "windows_generic_MSG" or "windows_dispatcher_MSG".
+            if eventType not in ("windows_generic_MSG", "windows_dispatcher_MSG"):
                 return False, 0
-            msg = ctypes.wintypes.MSG.from_address(int(message))
+            msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY and msg.wParam == self.hotkey_id:
                 self.hotkeyPressed.emit()
                 return True, 0

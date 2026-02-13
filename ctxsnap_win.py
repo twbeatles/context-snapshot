@@ -57,18 +57,22 @@ def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSyste
             win.activateWindow()
 
     act_show.triggered.connect(toggle_show)
-    act_quit.triggered.connect(app.quit)
+    act_quit.triggered.connect(win.request_quit)
 
     tray.setContextMenu(menu)
     # keep references for live updates
     tray.act_quick = act_quick  # type: ignore[attr-defined]
     tray.activated.connect(lambda reason: toggle_show() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)
     tray.show()
+    # Allow MainWindow to show tray notifications (e.g., close-to-tray hint).
+    win._tray = tray  # type: ignore[attr-defined]
     return tray
 
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    # Tray-style app: do not quit just because the main window is closed/hidden.
+    app.setQuitOnLastWindowClosed(False)
     set_pretty_style(app)
     app.setStyleSheet(APP_QSS)
 
@@ -101,7 +105,7 @@ def main() -> None:
         # Keep menu/hotkey label consistent after onboarding
         win._build_menus()
         if hasattr(win, "btn_quick"):
-            win.btn_quick.setText(f"Quick Snapshot ({win.hotkey_label()})")
+            win.btn_quick.setText(f"{tr('Quick Snapshot')} ({win.hotkey_label()})")
 
     tray = build_tray(app, win)
 
@@ -168,9 +172,9 @@ def main() -> None:
         # Update UI labels that depend on hotkey
         win._build_menus()
         if hasattr(win, "btn_quick"):
-            win.btn_quick.setText(f"Quick Snapshot ({win.hotkey_label()})")
+            win.btn_quick.setText(f"{tr('Quick Snapshot')} ({win.hotkey_label()})")
         if hasattr(tray, "act_quick"):
-            tray.act_quick.setText(f"Quick Snapshot ({win.hotkey_label()})")  # type: ignore[attr-defined]
+            tray.act_quick.setText(f"{tr('Quick Snapshot')} ({win.hotkey_label()})")  # type: ignore[attr-defined]
 
     win.on_settings_applied = apply_hotkey_from_settings
     apply_hotkey_from_settings()

@@ -163,6 +163,7 @@ python -m PyInstaller ctxsnap_win.spec
 ### 보안/프라이버시
 - 민감한 데이터 기본 저장 금지 (캡처 토글 존중)
 - 최근 파일/프로세스 저장 제외 옵션 제공
+- 백업/가져오기(import)로 들어온 스냅샷(`origin=imported`)은 앱 복원 시 경고/확인을 요구 (임의 실행 리스크 완화)
 
 ### 코드 구성
 - 공통 로직은 `ctxsnap/utils.py`로 분리
@@ -194,7 +195,11 @@ python -m PyInstaller ctxsnap_win.spec
 
 ## 테스트
 
-> 현재 자동화된 테스트 없음. 수동 테스트 권장.
+자동화 테스트(빠른 회귀 확인):
+
+```bash
+pytest -q
+```
 
 ### 수동 테스트 체크리스트
 1. 스냅샷 생성 및 저장 확인

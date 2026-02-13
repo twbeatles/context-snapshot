@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -119,7 +120,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if not root or not root_path.exists():
             if allow_dialog_fallback:
                 self.statusBar().showMessage(tr("Root invalid"), 3500)
-                self._run_snapshot_dialog(quick=True)
+                self._run_snapshot_dialog_prefill(
+                    quick=True,
+                    prefill={
+                        "root": root,
+                        "vscode_workspace": workspace,
+                        "note": note,
+                        "todos": todos,
+                        "tags": tags,
+                    },
+                )
             else:
                 self.statusBar().showMessage(f"Auto snapshot skipped ({reason}): invalid root.", 3500)
             return False
@@ -129,7 +139,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if enforce and any(not t for t in todos):
             if allow_dialog_fallback:
                 self.statusBar().showMessage(tr("Todos required"), 3500)
-                self._run_snapshot_dialog(quick=True)
+                self._run_snapshot_dialog_prefill(
+                    quick=True,
+                    prefill={
+                        "root": root,
+                        "vscode_workspace": workspace,
+                        "note": note,
+                        "todos": todos,
+                        "tags": tags,
+                    },
+                )
             else:
                 self.statusBar().showMessage(f"Auto snapshot skipped ({reason}): TODOs required.", 3500)
             return False
@@ -156,12 +175,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def _run_snapshot_dialog(self, *, quick: bool) -> bool:
+        return self._run_snapshot_dialog_prefill(quick=quick, prefill=None)
+
+    def _run_snapshot_dialog_prefill(self, *, quick: bool, prefill: Optional[Dict[str, Any]]) -> bool:
         dlg = SnapshotDialog(
             self,
             self.settings.get("default_root", str(Path.home())),
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
             enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+            prefill=prefill,
         )
         if quick:
             dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
@@ -200,7 +223,7 @@ class MainWindow(QtWidgets.QMainWindow):
         a_open_folder = QtGui.QAction(tr("Open App Folder"), self)
         a_open_folder.triggered.connect(self.open_app_folder)
         a_quit = QtGui.QAction(tr("Quit"), self)
-        a_quit.triggered.connect(QtWidgets.QApplication.quit)
+        a_quit.triggered.connect(self.request_quit)
         for a in [a_new, a_quick, None, a_restore, a_restore_last, None, a_open_folder, None, a_quit]:
             if a is None:
                 m_file.addSeparator()
@@ -287,11 +310,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText(tr("Search placeholder"))
+        self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
-        self.search_btn_clear = QtWidgets.QToolButton()
-        self.search_btn_clear.setText(tr("Clear"))
-        self.search_btn_clear.setToolTip(tr("Clear"))
-        self.search_btn_clear.clicked.connect(self._clear_search)
 
         self.selected_tags: Set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
@@ -325,20 +345,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self.listw = QtWidgets.QListView()
         self.listw.setUniformItemSizes(False)
         self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.listw.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.listw.setWordWrap(True)
         self.listw.setTextElideMode(QtCore.Qt.ElideRight)
         self.list_model = SnapshotListModel(self)
         self.listw.setModel(self.list_model)
         self.listw.selectionModel().currentChanged.connect(self.on_select)
+        self.listw.doubleClicked.connect(lambda _idx: self.restore_selected())
+        self.listw.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.listw.customContextMenuRequested.connect(self._show_list_context_menu)
 
         self.detail_title = QtWidgets.QLabel(tr("No snapshot selected"))
         self.detail_title.setObjectName("TitleLabel")
         self.detail_meta = QtWidgets.QLabel("")
         self.detail_meta.setObjectName("HintLabel")
 
-        self.detail = QtWidgets.QTextEdit()
-        self.detail.setReadOnly(True)
-        self.detail.setPlaceholderText(tr("Select a snapshot to see details."))
+        # Detail panel: structured tabs (more scannable than a single long text blob)
+        self.detail_tabs = QtWidgets.QTabWidget()
+
+        self.tab_overview = QtWidgets.QTextEdit()
+        self.tab_overview.setReadOnly(True)
+        self.tab_overview.setLineWrapMode(QtWidgets.QTextEdit.NoWrap)
+        self.tab_overview.setPlaceholderText(tr("Select a snapshot to see details."))
+        self.detail_tabs.addTab(self.tab_overview, tr("Overview"))
+
+        self.tab_recent_files = QtWidgets.QListWidget()
+        self.tab_recent_files.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.tab_recent_files.setToolTip(tr("Recent files tab hint"))
+        self.detail_tabs.addTab(self.tab_recent_files, tr("Recent files"))
+
+        self.tab_processes = QtWidgets.QListWidget()
+        self.tab_processes.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.detail_tabs.addTab(self.tab_processes, tr("Processes"))
+
+        self.tab_running_apps = QtWidgets.QListWidget()
+        self.tab_running_apps.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.detail_tabs.addTab(self.tab_running_apps, tr("Running apps"))
+
+        # Recent files UX: double-click to open; right-click for copy/open folder.
+        self.tab_recent_files.itemDoubleClicked.connect(lambda it: self._open_recent_file(str(it.data(QtCore.Qt.UserRole) or it.text())))
+        self.tab_recent_files.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tab_recent_files.customContextMenuRequested.connect(self._show_recent_files_context_menu)
 
         # Primary action buttons
         btn_new = QtWidgets.QPushButton(tr("New Snapshot"))
@@ -350,20 +397,18 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_restore = QtWidgets.QPushButton("▶ " + tr("Restore"))
         btn_restore.setProperty("primary", True)
         btn_restore_last = QtWidgets.QPushButton(tr("Restore Last"))
-        
-        # Edit and management buttons
-        btn_edit = QtWidgets.QPushButton("✏ " + tr("Edit"))
-        btn_pin = QtWidgets.QPushButton("📌 " + tr("Pin / Unpin"))
-        btn_archive = QtWidgets.QPushButton("🗄 " + tr("Archive / Unarchive"))
-        btn_compare = QtWidgets.QPushButton(tr("Compare"))
+
+        # Overflow actions (reduces button density; context menu also available)
+        btn_more = QtWidgets.QToolButton()
+        btn_more.setText("⋯ " + tr("More"))
+        btn_more.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.more_menu = QtWidgets.QMenu(self)
+        self.more_menu.aboutToShow.connect(self._populate_more_menu)
+        btn_more.setMenu(self.more_menu)
         
         # Quick actions
         btn_open_root = QtWidgets.QPushButton("📁 " + tr("Open Root Folder"))
         btn_open_vscode = QtWidgets.QPushButton("💻 " + tr("Open in VSCode"))
-        
-        # Danger button
-        btn_delete = QtWidgets.QPushButton("🗑 " + tr("Delete"))
-        btn_delete.setProperty("danger", True)
 
         btn_new.clicked.connect(self.new_snapshot)
         self.btn_quick.clicked.connect(self.quick_snapshot)
@@ -372,14 +417,17 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_restore_last.clicked.connect(self.restore_last)
         btn_open_root.clicked.connect(self.open_selected_root)
         btn_open_vscode.clicked.connect(self.open_selected_vscode)
-        btn_delete.clicked.connect(self.delete_selected)
-        btn_edit.clicked.connect(self.edit_selected)
-        btn_pin.clicked.connect(self.toggle_pin)
-        btn_archive.clicked.connect(self.toggle_archive)
-        btn_compare.clicked.connect(self.open_compare_dialog)
         
         # In-app keyboard shortcuts
         self._setup_shortcuts()
+
+        # Keep references for enabling/disabling based on selection.
+        self.btn_restore = btn_restore
+        self.btn_restore_last = btn_restore_last
+        self.btn_open_root = btn_open_root
+        self.btn_open_vscode = btn_open_vscode
+        self.btn_more = btn_more
+        self._sync_action_enabled(False)
 
         # Left panel - Snapshot list
         left = QtWidgets.QVBoxLayout()
@@ -390,7 +438,6 @@ class MainWindow(QtWidgets.QMainWindow):
         search_row = QtWidgets.QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self.search, 1)
-        search_row.addWidget(self.search_btn_clear)
         search_row.addWidget(self.tag_filter_btn)
         
         # Filter row (separate for cleaner layout)
@@ -441,7 +488,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right.setSpacing(8)
         right.addWidget(self.detail_title)
         right.addWidget(self.detail_meta)
-        right.addWidget(self.detail, 1)
+        right.addWidget(self.detail_tabs, 1)
 
         # Quick action buttons
         right_btns1 = QtWidgets.QHBoxLayout()
@@ -454,12 +501,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Management buttons
         right_btns2 = QtWidgets.QHBoxLayout()
         right_btns2.setSpacing(8)
-        right_btns2.addWidget(btn_pin)
-        right_btns2.addWidget(btn_archive)
-        right_btns2.addWidget(btn_compare)
+        right_btns2.addWidget(btn_more)
         right_btns2.addStretch(1)
-        right_btns2.addWidget(btn_edit)
-        right_btns2.addWidget(btn_delete)
         right_btns2.addWidget(btn_restore_last)
         right_btns2.addWidget(btn_restore)
         right.addLayout(right_btns2)
@@ -502,19 +545,38 @@ class MainWindow(QtWidgets.QMainWindow):
         # external hook (set by main) to re-apply hotkey settings
         self.on_settings_applied = None
         
-        # Flag for clean shutdown
-        self._is_closing = False
+        # When False: X closes to tray (hide). Quit must be explicit.
+        self._quit_requested = False
+        self._tray_hint_shown_session = False
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        """Clean up resources when closing the window."""
-        self._is_closing = True
-        
-        # Stop all timers
-        self.auto_timer.stop()
-        self.backup_timer.stop()
-        self.git_timer.stop()
-        
-        # Stop all background workers
+        # Default UX: close to tray (hide). Quit must be explicit.
+        if not bool(getattr(self, "_quit_requested", False)) and not QtCore.QCoreApplication.closingDown():
+            self.hide()
+            # One-time, non-blocking hint (per session) to avoid confusion.
+            try:
+                tray = getattr(self, "_tray", None)
+                if tray is not None and not bool(getattr(self, "_tray_hint_shown_session", False)):
+                    tray.showMessage(
+                        tr("Still running in tray title"),
+                        tr("Still running in tray msg"),
+                        QtWidgets.QSystemTrayIcon.Information,
+                        3500,
+                    )
+                    self._tray_hint_shown_session = True
+            except Exception:
+                pass
+            event.ignore()
+            return
+
+        # Explicit quit: stop timers and background workers.
+        try:
+            self.auto_timer.stop()
+            self.backup_timer.stop()
+            self.git_timer.stop()
+        except Exception:
+            pass
+
         for sid, thread in list(self._recent_workers.items()):
             try:
                 thread.quit()
@@ -525,9 +587,15 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception as e:
                 LOGGER.exception("Error stopping worker thread %s: %s", sid, e)
         self._recent_workers.clear()
-        
-        # Accept the close event (minimize to tray handled elsewhere if needed)
         event.accept()
+
+    def request_quit(self) -> None:
+        """Request a clean, explicit quit (used by tray/menu Quit)."""
+        self._quit_requested = True
+        try:
+            self.close()
+        finally:
+            QtWidgets.QApplication.quit()
 
     def _setup_shortcuts(self) -> None:
         """Set up in-app keyboard shortcuts."""
@@ -536,23 +604,12 @@ class MainWindow(QtWidgets.QMainWindow):
             QtGui.QKeySequence("Ctrl+N"), self
         ).activated.connect(self.new_snapshot)
         
-        # Ctrl+E: Edit selected snapshot
-        QtGui.QShortcut(
-            QtGui.QKeySequence("Ctrl+E"), self
-        ).activated.connect(self.edit_selected)
-        
-        # Delete: Delete selected snapshot
-        QtGui.QShortcut(
-            QtGui.QKeySequence("Delete"), self
-        ).activated.connect(self.delete_selected)
-        
-        # Ctrl+R or Enter: Restore selected snapshot
-        QtGui.QShortcut(
-            QtGui.QKeySequence("Ctrl+R"), self
-        ).activated.connect(self.restore_selected)
-        QtGui.QShortcut(
-            QtGui.QKeySequence("Return"), self
-        ).activated.connect(self.restore_selected)
+        # List-scoped shortcuts (avoid destructive actions while typing in search/note fields).
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+E"), self.listw).activated.connect(self.edit_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self.listw).activated.connect(self.delete_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+R"), self.listw).activated.connect(self.restore_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("Return"), self.listw).activated.connect(self.restore_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("Enter"), self.listw).activated.connect(self.restore_selected)
         
         # Ctrl+F: Focus search bar
         QtGui.QShortcut(
@@ -565,14 +622,167 @@ class MainWindow(QtWidgets.QMainWindow):
         ).activated.connect(self.open_settings)
         
         # Ctrl+P: Toggle pin
-        QtGui.QShortcut(
-            QtGui.QKeySequence("Ctrl+P"), self
-        ).activated.connect(self.toggle_pin)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+P"), self.listw).activated.connect(self.toggle_pin)
         
         # Escape: Clear search
         QtGui.QShortcut(
             QtGui.QKeySequence("Escape"), self
         ).activated.connect(self._clear_search)
+
+    def _copy_text(self, label: str, text: str) -> None:
+        try:
+            QtWidgets.QApplication.clipboard().setText(text or "")
+            self.statusBar().showMessage(f"{label} {tr('Copied')}", 2500)
+        except Exception:
+            pass
+
+    def _show_list_context_menu(self, pos: QtCore.QPoint) -> None:
+        idx = self.listw.indexAt(pos)
+        if idx.isValid():
+            self.listw.setCurrentIndex(idx)
+        sid = self.selected_id()
+        if not sid:
+            return
+        snap = self.load_snapshot(sid) or {}
+
+        menu = QtWidgets.QMenu(self)
+        a_restore = menu.addAction(tr("Restore"))
+        a_restore.triggered.connect(self.restore_selected)
+        menu.addSeparator()
+
+        a_edit = menu.addAction(tr("Edit"))
+        a_edit.triggered.connect(self.edit_selected)
+
+        a_pin = menu.addAction(tr("Pin / Unpin"))
+        a_pin.triggered.connect(self.toggle_pin)
+
+        a_arch = menu.addAction(tr("Archive / Unarchive"))
+        a_arch.triggered.connect(self.toggle_archive)
+
+        menu.addSeparator()
+        a_open_root = menu.addAction(tr("Open Root Folder"))
+        a_open_root.triggered.connect(self.open_selected_root)
+        a_open_vscode = menu.addAction(tr("Open in VSCode"))
+        a_open_vscode.triggered.connect(self.open_selected_vscode)
+
+        menu.addSeparator()
+        a_copy_title = menu.addAction(tr("Copy title"))
+        a_copy_title.triggered.connect(lambda: self._copy_text(tr("Title") + ":", str(snap.get("title") or "")))
+        a_copy_root = menu.addAction(tr("Copy root path"))
+        a_copy_root.triggered.connect(lambda: self._copy_text(tr("Root") + ":", str(snap.get("root") or "")))
+        a_copy_todos = menu.addAction(tr("Copy TODOs"))
+        todos = [str(t).strip() for t in (snap.get("todos", []) or []) if str(t).strip()]
+        a_copy_todos.triggered.connect(lambda: self._copy_text(tr("TODOs") + ":", "\n".join(todos)))
+
+        menu.addSeparator()
+        a_delete = menu.addAction(tr("Delete"))
+        a_delete.triggered.connect(self.delete_selected)
+
+        menu.exec(self.listw.viewport().mapToGlobal(pos))
+
+    def _populate_more_menu(self) -> None:
+        menu = getattr(self, "more_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+
+        sid = self.selected_id()
+        snap = self.load_snapshot(sid) if sid else None
+        has_sel = bool(snap)
+        snaps_any = (self.index.get("snapshots", []) or []) if isinstance(getattr(self, "index", None), dict) else []
+        has_any = bool(snaps_any)
+
+        a_edit = menu.addAction(tr("Edit"))
+        a_edit.setEnabled(has_sel)
+        a_edit.triggered.connect(self.edit_selected)
+
+        a_pin = menu.addAction(tr("Pin / Unpin"))
+        a_pin.setEnabled(has_sel)
+        a_pin.triggered.connect(self.toggle_pin)
+
+        a_arch = menu.addAction(tr("Archive / Unarchive"))
+        a_arch.setEnabled(has_sel)
+        a_arch.triggered.connect(self.toggle_archive)
+
+        menu.addSeparator()
+
+        a_export = menu.addAction(tr("Export Selected Snapshot"))
+        a_export.setEnabled(has_sel)
+        a_export.triggered.connect(self.export_selected_snapshot)
+
+        a_report = menu.addAction(tr("Export Weekly Report"))
+        a_report.setEnabled(has_any)
+        a_report.triggered.connect(self.export_weekly_report)
+
+        a_compare = menu.addAction(tr("Compare Snapshots"))
+        a_compare.setEnabled(len(snaps_any) >= 2)
+        a_compare.triggered.connect(self.open_compare_dialog)
+
+        a_history = menu.addAction(tr("Open Restore History"))
+        a_history.setEnabled(True)
+        a_history.triggered.connect(self.open_restore_history)
+
+        menu.addSeparator()
+
+        a_settings = menu.addAction(tr("Settings"))
+        a_settings.triggered.connect(self.open_settings)
+
+        menu.addSeparator()
+
+        a_delete = menu.addAction(tr("Delete"))
+        a_delete.setEnabled(has_sel)
+        a_delete.triggered.connect(self.delete_selected)
+
+    def _open_recent_file(self, p: str) -> None:
+        p = str(p or "").strip()
+        if not p:
+            return
+        try:
+            path = Path(p).expanduser()
+            if not path.exists():
+                QtWidgets.QMessageBox.information(self, tr("Information"), tr("File not found") + f":\n{p}")
+                return
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, tr("Error"), f"{tr('Open file failed')}: {e}")
+
+    def _show_recent_files_context_menu(self, pos: QtCore.QPoint) -> None:
+        it = self.tab_recent_files.itemAt(pos)
+        if it is None:
+            return
+        p = str(it.data(QtCore.Qt.UserRole) or it.text() or "").strip()
+        if not p:
+            return
+        path = Path(p).expanduser()
+
+        menu = QtWidgets.QMenu(self)
+        a_open = menu.addAction(tr("Open file"))
+        a_open.triggered.connect(lambda: self._open_recent_file(p))
+        a_open_folder = menu.addAction(tr("Open containing folder"))
+        a_open_folder.triggered.connect(lambda: open_folder(path.parent if path.parent else Path.home()))
+        menu.addSeparator()
+        a_copy = menu.addAction(tr("Copy path"))
+        a_copy.triggered.connect(lambda: self._copy_text(tr("Path") + ":", p))
+        menu.exec(self.tab_recent_files.viewport().mapToGlobal(pos))
+
+    def _sync_action_enabled(self, has_selection: bool) -> None:
+        # Restore Last is meaningful as long as there is at least one snapshot.
+        snaps_any = (self.index.get("snapshots", []) or []) if isinstance(getattr(self, "index", None), dict) else []
+        has_any = bool(snaps_any)
+        w_last = getattr(self, "btn_restore_last", None)
+        if w_last is not None:
+            w_last.setEnabled(has_any)
+        for name in (
+            "btn_restore",
+            "btn_open_root",
+            "btn_open_vscode",
+        ):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setEnabled(bool(has_selection))
+        w_more = getattr(self, "btn_more", None)
+        if w_more is not None:
+            w_more.setEnabled(True)
 
     def _auto_snapshot_prompt(self) -> None:
         if int(self.settings.get("auto_snapshot_minutes", 0)) <= 0:
@@ -719,7 +929,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_tag_menu(self) -> None:
         menu = QtWidgets.QMenu(self)
-        clear_action = QtGui.QAction("All tags", self)
+        clear_action = QtGui.QAction(tr("All tags"), self)
         clear_action.triggered.connect(self._clear_tag_filter)
         menu.addAction(clear_action)
         menu.addSeparator()
@@ -732,6 +942,10 @@ class MainWindow(QtWidgets.QMainWindow):
             action.triggered.connect(self._toggle_tag_filter)
             menu.addAction(action)
         self.tag_filter_btn.setMenu(menu)
+        if self.selected_tags:
+            self.tag_filter_btn.setText(f"{tr('Tags')} ({len(self.selected_tags)})")
+        else:
+            self.tag_filter_btn.setText(tr("Tags"))
 
     def _toggle_tag_filter(self) -> None:
         action = self.sender()
@@ -741,6 +955,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.selected_tags.add(tag)
             else:
                 self.selected_tags.discard(tag)
+        self._build_tag_menu()
         self._reset_pagination_and_refresh()
 
     def _clear_tag_filter(self) -> None:
@@ -854,6 +1069,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{tr('Storage:')} {showing} / {len(view_items)} (Total {total_all})"
             )
         self._update_pagination_controls()
+        if self.list_model.rowCount() == 0:
+            # Keep detail panel in sync when filtering yields zero results.
+            self.on_select(QtCore.QModelIndex(), QtCore.QModelIndex())
 
     def selected_id(self) -> Optional[str]:
         idx = self.listw.currentIndex()
@@ -902,18 +1120,27 @@ class MainWindow(QtWidgets.QMainWindow):
         if not current.isValid():
             self.detail_title.setText(tr("No snapshot selected"))
             self.detail_meta.setText("")
-            self.detail.setText(tr("Select a snapshot to see details."))
+            self.tab_overview.clear()
+            self.tab_recent_files.clear()
+            self.tab_processes.clear()
+            self.tab_running_apps.clear()
+            self._sync_action_enabled(False)
             return
         sid = self.selected_id()
         if not sid:
             return
         snap = self.load_snapshot(sid)
         if not snap:
-            self.detail_title.setText("Snapshot file missing")
+            self.detail_title.setText(tr("Snapshot file missing"))
             self.detail_meta.setText("")
-            self.detail.setText("")
+            self.tab_overview.clear()
+            self.tab_recent_files.clear()
+            self.tab_processes.clear()
+            self.tab_running_apps.clear()
+            self._sync_action_enabled(False)
             return
 
+        self._sync_action_enabled(True)
         self.detail_title.setText(snap.get("title", sid))
         tags = snap.get("tags", [])
         pinned = "📌" if bool(snap.get("pinned", False)) else ""
@@ -931,19 +1158,46 @@ class MainWindow(QtWidgets.QMainWindow):
         running_apps = snap.get("running_apps", [])
         
         text = (
-            f"NOTE:\n{snap.get('note','') or '(none)'}\n\n"
-            f"TODOs:\n"
+            f"{tr('Note')}:\n{snap.get('note','') or '(none)'}\n\n"
+            f"{tr('TODOs')}:\n"
             f"  1) {todos[0] if len(todos)>0 else ''}\n"
             f"  2) {todos[1] if len(todos)>1 else ''}\n"
-            f"  3) {todos[2] if len(todos)>2 else ''}\n\n"
-            f"Recent files (top 12):\n" +
-            "".join([f"  - {p}\n" for p in recent[:12]]) +
-            f"\nProcesses (filtered, {len(proc)}):\n" +
-            "".join([f"  - {p.get('name','')}   {p.get('exe','')}\n" for p in proc[:20]]) +
-            f"\nRunning apps (taskbar, {len(running_apps)}):\n" +
-            "".join([f"  - {p.get('name','')}   {p.get('exe','')}\n" for p in running_apps[:20]])
+            f"  3) {todos[2] if len(todos)>2 else ''}\n"
         )
-        self.detail.setText(text)
+        self.tab_overview.setText(text)
+
+        self.tab_recent_files.clear()
+        for p in (recent or []):
+            p_str = str(p or "").strip()
+            if not p_str:
+                continue
+            it = QtWidgets.QListWidgetItem(p_str)
+            it.setToolTip(p_str)
+            it.setData(QtCore.Qt.UserRole, p_str)
+            self.tab_recent_files.addItem(it)
+
+        self.tab_processes.clear()
+        for p in (proc or []):
+            name = str(p.get("name", "") or "")
+            exe = str(p.get("exe", "") or "")
+            label = f"{name}  -  {exe}".strip()
+            if not label:
+                continue
+            it = QtWidgets.QListWidgetItem(label)
+            it.setToolTip(label)
+            self.tab_processes.addItem(it)
+
+        self.tab_running_apps.clear()
+        for a in (running_apps or []):
+            name = str(a.get("name", "") or "")
+            title = str(a.get("title", "") or "")
+            exe = str(a.get("exe", "") or "")
+            label = f"{name}  |  {title}  |  {exe}".strip()
+            if not label:
+                continue
+            it = QtWidgets.QListWidgetItem(label)
+            it.setToolTip(label)
+            self.tab_running_apps.addItem(it)
 
     # ----- actions -----
     def edit_selected(self) -> None:
@@ -1039,8 +1293,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self._run_snapshot_dialog(quick=False)
 
     def quick_snapshot(self) -> None:
-        # Silent quick snapshot based on last saved form. Falls back to dialog once if needed.
-        self._silent_snapshot(allow_dialog_fallback=True, reason="quick")
+        # Always show dialog for Quick Snapshot (hotkey/tray), prefilled from last form.
+        form = self.settings.get("last_snapshot_form", {}) if isinstance(self.settings.get("last_snapshot_form", {}), dict) else {}
+        prefill = {
+            "root": str(form.get("root") or self.settings.get("default_root", str(Path.home()))),
+            "vscode_workspace": str(form.get("vscode_workspace") or ""),
+            "note": str(form.get("note") or ""),
+            "todos": form.get("todos") if isinstance(form.get("todos"), list) else ["", "", ""],
+            "tags": form.get("tags") if isinstance(form.get("tags"), list) else [],
+        }
+        # If the main window is hidden (close-to-tray), ensure the dialog is visible.
+        dlg_parent = self if self.isVisible() else None
+        dlg = SnapshotDialog(
+            dlg_parent,
+            self.settings.get("default_root", str(Path.home())),
+            self.settings.get("tags", DEFAULT_TAGS),
+            self.settings.get("templates", []),
+            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+            prefill=prefill,
+        )
+        dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
+        if not self.isVisible():
+            dlg.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        v = dlg.values()
+        self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"], interactive=True)
 
     def _create_snapshot(
         self,
@@ -1126,7 +1404,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))
-        self.statusBar().showMessage(f"Saved snapshot: {sid}", 3500)
+        self.statusBar().showMessage(f"{tr('Snapshot saved')}: {sid}", 3500)
 
     def _update_snapshot_meta(
         self,
@@ -1171,7 +1449,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new_state = not bool(snap.get("pinned", False))
         self._update_snapshot_meta(sid, pinned=new_state)
         self.refresh_list(reset_page=False)
-        self.statusBar().showMessage("Pinned." if new_state else "Unpinned.", 2000)
+        self.statusBar().showMessage(tr("Pinned.") if new_state else tr("Unpinned."), 2000)
 
     def toggle_archive(self) -> None:
         sid = self.selected_id()
@@ -1183,7 +1461,7 @@ class MainWindow(QtWidgets.QMainWindow):
         new_state = not bool(snap.get("archived", False))
         self._update_snapshot_meta(sid, archived=new_state)
         self._reset_pagination_and_refresh()
-        self.statusBar().showMessage("Archived." if new_state else "Unarchived.", 2000)
+        self.statusBar().showMessage(tr("Archived.") if new_state else tr("Unarchived."), 2000)
 
     def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> None:
         """Apply settings immediately (UI + hotkey)."""
@@ -1204,7 +1482,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Update labels
         if hasattr(self, "btn_quick"):
-            self.btn_quick.setText(f"Quick Snapshot ({self.hotkey_label()})")
+            self.btn_quick.setText(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
         self._build_menus()
 
         if callable(self.on_settings_applied):
@@ -1278,7 +1556,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 if strategy == "merge" and sid in existing_ids:
                     continue
                 try:
-                    save_snapshot_file(self.snap_path(sid), migrate_snapshot(snap))
+                    snap_to_write = migrate_snapshot(snap)
+                    snap_to_write["origin"] = "imported"
+                    snap_to_write["imported_at"] = now_iso()
+                    save_snapshot_file(self.snap_path(sid), snap_to_write)
                 except Exception as e:
                     log_exc("write imported snapshot", e)
                     continue
@@ -1331,7 +1612,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.apply_settings(vals, save=True)
 
-        self.statusBar().showMessage("Settings applied.", 2500)
+        self.statusBar().showMessage(tr("Settings applied."), 2500)
 
     def open_selected_root(self) -> None:
         sid = self.selected_id()
@@ -1448,7 +1729,7 @@ class MainWindow(QtWidgets.QMainWindow):
         open_folder_default = bool(restore_cfg.get("open_folder", True))
         open_terminal_default = bool(restore_cfg.get("open_terminal", True))
         open_vscode_default = bool(restore_cfg.get("open_vscode", True))
-        open_running_apps_default = bool(restore_cfg.get("open_running_apps", True))
+        open_running_apps_default = bool(restore_cfg.get("open_running_apps", False))
         show_checklist = bool(restore_cfg.get("show_post_restore_checklist", True))
         preview_default = bool(self.settings.get("restore_preview_default", True))
 
@@ -1498,12 +1779,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 errors.append(f"{tr('Restore open vscode failed')} {error}")
         
         requested_apps = []
+        running_app_failures: List[str] = []
+        apps_restore_skipped = False
+        apps_restore_skip_reason = ""
         if ch.get("open_running_apps"):
             # Respect the user's explicit selection (empty list means "none").
             requested_apps = ch.get("running_apps", [])
-            running_app_failures = restore_running_apps(requested_apps, parent=self)
-        else:
-            running_app_failures = []
+            if snap.get("origin") == "imported" and requested_apps:
+                msg = QtWidgets.QMessageBox(self)
+                msg.setIcon(QtWidgets.QMessageBox.Warning)
+                msg.setWindowTitle(tr("Imported snapshot warning title"))
+                msg.setText(tr("Imported snapshot warning msg"))
+                btn_proceed = msg.addButton(tr("Proceed"), QtWidgets.QMessageBox.AcceptRole)
+                msg.addButton(tr("Cancel"), QtWidgets.QMessageBox.RejectRole)
+                msg.exec()
+                if msg.clickedButton() != btn_proceed:
+                    apps_restore_skipped = True
+                    apps_restore_skip_reason = "imported_snapshot_cancel"
+                    requested_apps = []
+                    running_app_failures = []
+                    self.statusBar().showMessage(tr("Skipped app restore for imported snapshot"), 4500)
+                else:
+                    running_app_failures = restore_running_apps(requested_apps, parent=self)
+            else:
+                running_app_failures = restore_running_apps(requested_apps, parent=self)
 
         append_restore_history({
             "snapshot_id": sid,
@@ -1516,6 +1815,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "running_apps_failed": running_app_failures,
             "root_missing": root_missing,
             "vscode_opened": vscode_opened,
+            "running_apps_skipped": apps_restore_skipped,
+            "running_apps_skip_reason": apps_restore_skip_reason,
         })
 
         # Show errors if any

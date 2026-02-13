@@ -113,7 +113,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
-        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
 
         self.preview_default = QtWidgets.QCheckBox("👁 " + tr("Show restore preview by default"))
@@ -573,7 +573,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
-        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
         self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
 

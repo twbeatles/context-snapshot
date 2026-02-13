@@ -17,6 +17,8 @@ class SnapshotDialog(QtWidgets.QDialog):
         available_tags: List[str],
         templates: List[Dict[str, Any]],
         enforce_todos: bool = True,
+        *,
+        prefill: Dict[str, Any] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(tr("New Snapshot"))
@@ -132,6 +134,48 @@ class SnapshotDialog(QtWidgets.QDialog):
         layout.addWidget(todo_box)
         layout.addWidget(self.err)
         layout.addLayout(btn_row)
+
+        # Prefill (used by Quick Snapshot / hotkey)
+        if prefill and isinstance(prefill, dict):
+            try:
+                root = str(prefill.get("root") or "").strip()
+                if root:
+                    self.root_edit.setText(root)
+                ws = str(prefill.get("vscode_workspace") or "").strip()
+                if ws:
+                    self.workspace_edit.setText(ws)
+                note = str(prefill.get("note") or "")
+                if note:
+                    self.note_edit.setPlainText(note)
+                todos = prefill.get("todos") if isinstance(prefill.get("todos"), list) else []
+                todo_vals = [str(x or "") for x in (todos or [])][:3]
+                while len(todo_vals) < 3:
+                    todo_vals.append("")
+                self.todo1.setText(todo_vals[0])
+                self.todo2.setText(todo_vals[1])
+                self.todo3.setText(todo_vals[2])
+
+                tags = prefill.get("tags") if isinstance(prefill.get("tags"), list) else []
+                tag_set = {str(x).strip() for x in (tags or []) if str(x).strip()}
+                # First apply to existing items.
+                for i in range(self.tags_list.count()):
+                    it = self.tags_list.item(i)
+                    it.setCheckState(QtCore.Qt.Checked if it.text() in tag_set else QtCore.Qt.Unchecked)
+                    tag_set.discard(it.text())
+                # Add any remaining tags not in the provided list.
+                for t in sorted(tag_set):
+                    it = QtWidgets.QListWidgetItem(t)
+                    it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+                    it.setCheckState(QtCore.Qt.Checked)
+                    self.tags_list.addItem(it)
+            except Exception:
+                # Prefill should never prevent the dialog from opening.
+                pass
+            # Quick Snapshot flow: guide user to next actions immediately.
+            self.todo1.setFocus()
+        else:
+            # New Snapshot flow: title first.
+            self.title_edit.setFocus()
 
     def pick_folder(self):
         path = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Select folder"), self.root_edit.text() or str(Path.home()))

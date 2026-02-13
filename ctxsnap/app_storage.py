@@ -79,7 +79,8 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                         "open_folder": True,
                         "open_terminal": True,
                         "open_vscode": True,
-                        "open_running_apps": True,
+                        # Default OFF: launching apps from a snapshot can be surprising/risky.
+                        "open_running_apps": False,
                         "show_post_restore_checklist": True,
                     },
                 },
@@ -225,10 +226,20 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
             "open_folder": True,
             "open_terminal": True,
             "open_vscode": True,
-            "open_running_apps": True,
+            "open_running_apps": False,
             "show_post_restore_checklist": True,
         },
     )
+    # Backfill nested keys even if "restore" existed but was missing some entries.
+    restore = settings.get("restore")
+    if not isinstance(restore, dict):
+        restore = {}
+    restore.setdefault("open_folder", True)
+    restore.setdefault("open_terminal", True)
+    restore.setdefault("open_vscode", True)
+    restore.setdefault("open_running_apps", False)
+    restore.setdefault("show_post_restore_checklist", True)
+    settings["restore"] = restore
     # UX
     settings.setdefault("onboarding_shown", False)
     settings.setdefault(
@@ -328,6 +339,9 @@ def migrate_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     snap.setdefault("pinned", False)
     snap.setdefault("archived", False)
     snap.setdefault("running_apps", [])
+    # Security: imported snapshots may contain untrusted launch commands.
+    snap.setdefault("origin", "local")  # "local" | "imported"
+    snap.setdefault("imported_at", "")
     return snap
 
 
