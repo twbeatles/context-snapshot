@@ -1190,6 +1190,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Apply settings immediately (UI + hotkey)."""
         vals = migrate_settings(vals)
         vals.setdefault("default_root", self.settings.get("default_root", str(Path.home())))
+        # Preserve last snapshot form when Settings dialog doesn't include it.
+        vals.setdefault("last_snapshot_form", self.settings.get("last_snapshot_form", {}))
         self.settings = vals
         if save:
             try:
