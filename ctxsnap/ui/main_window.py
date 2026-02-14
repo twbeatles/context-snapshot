@@ -38,7 +38,7 @@ from ctxsnap.ui.dialogs.onboarding import OnboardingDialog
 from ctxsnap.ui.dialogs.restore import ChecklistDialog, RestorePreviewDialog
 from ctxsnap.ui.dialogs.settings import SettingsDialog
 from ctxsnap.ui.dialogs.snapshot import EditSnapshotDialog, SnapshotDialog
-from ctxsnap.ui.models import SnapshotListModel
+from ctxsnap.ui.models import SnapshotDelegate, SnapshotListModel
 from ctxsnap.ui.styles import NoScrollComboBox
 from ctxsnap.utils import (
     build_search_blob,
@@ -275,7 +275,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CtxSnap")
-        self.setMinimumSize(1020, 640)
+        self.setMinimumSize(1060, 660)
 
         self.snaps_dir, self.index_path, self.settings_path = ensure_storage()
         self.index = load_json(self.index_path)
@@ -308,11 +308,13 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
+        # --- Search bar ---
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText(tr("Search placeholder"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
 
+        # --- Filter controls (collapsed by default) ---
         self.selected_tags: Set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
         self.tag_filter_btn.setText(tr("Tags"))
@@ -325,7 +327,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.days_filter.addItem(tr("Last 3 days"), "3")
         self.days_filter.addItem(tr("Last 7 days"), "7")
         self.days_filter.addItem(tr("Last 30 days"), "30")
-        
         self.days_filter.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.sort_combo = NoScrollComboBox()
@@ -333,7 +334,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sort_combo.addItem(tr("Oldest"), "oldest")
         self.sort_combo.addItem(tr("Pinned first"), "pinned")
         self.sort_combo.addItem(tr("Title"), "title")
-        
         self.sort_combo.currentIndexChanged.connect(self._reset_pagination_and_refresh)
 
         self.pinned_only = QtWidgets.QCheckBox(tr("Pinned only"))
@@ -342,30 +342,54 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_archived = QtWidgets.QCheckBox(tr("Show archived"))
         self.show_archived.stateChanged.connect(self._reset_pagination_and_refresh)
 
+        # Collapsible filter panel
+        self._filter_widget = QtWidgets.QWidget()
+        filter_inner = QtWidgets.QHBoxLayout(self._filter_widget)
+        filter_inner.setContentsMargins(0, 0, 0, 0)
+        filter_inner.setSpacing(8)
+        filter_inner.addWidget(self.tag_filter_btn)
+        filter_inner.addWidget(self.days_filter)
+        filter_inner.addWidget(self.sort_combo)
+        filter_inner.addWidget(self.pinned_only)
+        filter_inner.addWidget(self.show_archived)
+        filter_inner.addStretch(1)
+        self._filter_widget.setVisible(False)
+
+        self._filter_toggle = QtWidgets.QToolButton()
+        self._filter_toggle.setText(tr("Filters"))
+        self._filter_toggle.setCheckable(True)
+        self._filter_toggle.setChecked(False)
+        self._filter_toggle.toggled.connect(self._filter_widget.setVisible)
+
+        # --- Snapshot list view with custom delegate ---
         self.listw = QtWidgets.QListView()
         self.listw.setUniformItemSizes(False)
         self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.listw.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.listw.setWordWrap(True)
+        self.listw.setWordWrap(False)
         self.listw.setTextElideMode(QtCore.Qt.ElideRight)
         self.list_model = SnapshotListModel(self)
+        self._list_delegate = SnapshotDelegate(self.listw)
+        self.listw.setItemDelegate(self._list_delegate)
         self.listw.setModel(self.list_model)
         self.listw.selectionModel().currentChanged.connect(self.on_select)
         self.listw.doubleClicked.connect(lambda _idx: self.restore_selected())
         self.listw.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.listw.customContextMenuRequested.connect(self._show_list_context_menu)
 
+        # --- Detail panel ---
         self.detail_title = QtWidgets.QLabel(tr("No snapshot selected"))
         self.detail_title.setObjectName("TitleLabel")
         self.detail_meta = QtWidgets.QLabel("")
         self.detail_meta.setObjectName("HintLabel")
+        self.detail_meta.setWordWrap(True)
 
-        # Detail panel: structured tabs (more scannable than a single long text blob)
         self.detail_tabs = QtWidgets.QTabWidget()
 
-        self.tab_overview = QtWidgets.QTextEdit()
+        # Overview tab uses QTextBrowser for HTML rendering
+        self.tab_overview = QtWidgets.QTextBrowser()
         self.tab_overview.setReadOnly(True)
-        self.tab_overview.setLineWrapMode(QtWidgets.QTextEdit.NoWrap)
+        self.tab_overview.setOpenExternalLinks(False)
         self.tab_overview.setPlaceholderText(tr("Select a snapshot to see details."))
         self.detail_tabs.addTab(self.tab_overview, tr("Overview"))
 
@@ -387,37 +411,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tab_recent_files.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tab_recent_files.customContextMenuRequested.connect(self._show_recent_files_context_menu)
 
-        # Primary action buttons
+        # --- Action buttons ---
         btn_new = QtWidgets.QPushButton(tr("New Snapshot"))
         btn_new.setProperty("primary", True)
         self.btn_quick = QtWidgets.QPushButton(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
-        btn_settings = QtWidgets.QPushButton("⚙ " + tr("Settings"))
-        
-        # Restore action buttons
-        btn_restore = QtWidgets.QPushButton("▶ " + tr("Restore"))
+        self.btn_quick.setProperty("secondary", True)
+
+        btn_restore = QtWidgets.QPushButton(tr("Restore"))
         btn_restore.setProperty("primary", True)
         btn_restore_last = QtWidgets.QPushButton(tr("Restore Last"))
 
-        # Overflow actions (reduces button density; context menu also available)
+        # Overflow actions
         btn_more = QtWidgets.QToolButton()
-        btn_more.setText("⋯ " + tr("More"))
+        btn_more.setText(tr("More"))
         btn_more.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.more_menu = QtWidgets.QMenu(self)
         self.more_menu.aboutToShow.connect(self._populate_more_menu)
         btn_more.setMenu(self.more_menu)
-        
-        # Quick actions
-        btn_open_root = QtWidgets.QPushButton("📁 " + tr("Open Root Folder"))
-        btn_open_vscode = QtWidgets.QPushButton("💻 " + tr("Open in VSCode"))
+
+        # Quick actions (moved inline in detail panel)
+        btn_open_root = QtWidgets.QPushButton(tr("Open Folder"))
+        btn_open_root.setProperty("secondary", True)
+        btn_open_vscode = QtWidgets.QPushButton(tr("Open VSCode"))
+        btn_open_vscode.setProperty("secondary", True)
 
         btn_new.clicked.connect(self.new_snapshot)
         self.btn_quick.clicked.connect(self.quick_snapshot)
-        btn_settings.clicked.connect(self.open_settings)
         btn_restore.clicked.connect(self.restore_selected)
         btn_restore_last.clicked.connect(self.restore_last)
         btn_open_root.clicked.connect(self.open_selected_root)
         btn_open_vscode.clicked.connect(self.open_selected_vscode)
-        
+
         # In-app keyboard shortcuts
         self._setup_shortcuts()
 
@@ -429,68 +453,62 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_more = btn_more
         self._sync_action_enabled(False)
 
-        # Left panel - Snapshot list
+        # ==========================================
+        # Layout: Left panel (Snapshot list)
+        # ==========================================
         left = QtWidgets.QVBoxLayout()
-        left.setContentsMargins(12, 12, 6, 12)
-        left.setSpacing(10)
-        
-        # Search row with improved spacing
+        left.setContentsMargins(12, 12, 4, 12)
+        left.setSpacing(8)
+
+        # Search row: search + filter toggle + new button
         search_row = QtWidgets.QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self.search, 1)
-        search_row.addWidget(self.tag_filter_btn)
-        
-        # Filter row (separate for cleaner layout)
-        filter_row = QtWidgets.QHBoxLayout()
-        filter_row.setSpacing(8)
-        filter_row.addWidget(self.days_filter)
-        filter_row.addWidget(self.sort_combo)
-        filter_row.addWidget(self.pinned_only)
-        filter_row.addWidget(self.show_archived)
-        filter_row.addStretch(1)
-        
+        search_row.addWidget(self._filter_toggle)
+        search_row.addWidget(btn_new)
+
         left.addLayout(search_row)
-        left.addLayout(filter_row)
+        left.addWidget(self._filter_widget)
         left.addWidget(self.listw, 1)
-        
+
+        # Result + pagination
         self.result_label = QtWidgets.QLabel("")
         self.result_label.setObjectName("HintLabel")
-        left.addWidget(self.result_label)
-        
-        # Pagination row
+
         page_row = QtWidgets.QHBoxLayout()
         page_row.setSpacing(6)
         self.page_prev_btn = QtWidgets.QToolButton()
-        self.page_prev_btn.setText("← " + tr("Prev"))
+        self.page_prev_btn.setText(tr("Prev"))
         self.page_prev_btn.clicked.connect(self._prev_page)
         self.page_next_btn = QtWidgets.QToolButton()
-        self.page_next_btn.setText(tr("Next") + " →")
+        self.page_next_btn.setText(tr("Next"))
         self.page_next_btn.clicked.connect(self._next_page)
         self.page_label = QtWidgets.QLabel("")
         self.page_label.setObjectName("HintLabel")
-        page_row.addWidget(self.page_prev_btn)
-        page_row.addWidget(self.page_next_btn)
+        page_row.addWidget(self.result_label)
         page_row.addStretch(1)
+        page_row.addWidget(self.page_prev_btn)
         page_row.addWidget(self.page_label)
+        page_row.addWidget(self.page_next_btn)
         left.addLayout(page_row)
-        
-        # Left button row
+
+        # Bottom left: quick snapshot
         left_btns = QtWidgets.QHBoxLayout()
         left_btns.setSpacing(8)
-        left_btns.addWidget(btn_new)
-        left_btns.addWidget(self.btn_quick)
-        left_btns.addWidget(btn_settings)
+        left_btns.addWidget(self.btn_quick, 1)
         left.addLayout(left_btns)
 
-        # Right panel - Detail view
+        # ==========================================
+        # Layout: Right panel (Detail view)
+        # ==========================================
         right = QtWidgets.QVBoxLayout()
-        right.setContentsMargins(6, 12, 12, 12)
+        right.setContentsMargins(4, 12, 12, 12)
         right.setSpacing(8)
         right.addWidget(self.detail_title)
         right.addWidget(self.detail_meta)
         right.addWidget(self.detail_tabs, 1)
 
-        # Quick action buttons
+        # Inline quick actions
         right_btns1 = QtWidgets.QHBoxLayout()
         right_btns1.setSpacing(8)
         right_btns1.addWidget(btn_open_root)
@@ -498,7 +516,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_btns1.addStretch(1)
         right.addLayout(right_btns1)
 
-        # Management buttons
+        # Bottom right: more + restore
         right_btns2 = QtWidgets.QHBoxLayout()
         right_btns2.setSpacing(8)
         right_btns2.addWidget(btn_more)
@@ -1143,28 +1161,63 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_action_enabled(True)
         self.detail_title.setText(snap.get("title", sid))
         tags = snap.get("tags", [])
-        pinned = "📌" if bool(snap.get("pinned", False)) else ""
-        archived = "🗄️ " if bool(snap.get("archived", False)) else ""
+        pinned = "[Pinned] " if bool(snap.get("pinned", False)) else ""
+        archived = "[Archived] " if bool(snap.get("archived", False)) else ""
         ws = snap.get("vscode_workspace", "")
-        ws_line = f"  •  workspace: {ws}" if ws else ""
-        tag_line = f"  •  tags: {', '.join(tags)}" if tags else ""
-        self.detail_meta.setText(
-            f"{archived}{pinned}{snap.get('created_at','')}  •  {snap.get('root','')}{ws_line}{tag_line}"
-        )
+        meta_parts = [f"{archived}{pinned}{snap.get('created_at', '')}"]
+        if snap.get("root"):
+            meta_parts.append(snap["root"])
+        if ws:
+            meta_parts.append(f"workspace: {ws}")
+        if tags:
+            meta_parts.append(", ".join(tags))
+        self.detail_meta.setText("  ·  ".join(meta_parts))
 
         todos = snap.get("todos", [])
         recent = snap.get("recent_files", [])
         proc = snap.get("processes", [])
         running_apps = snap.get("running_apps", [])
-        
-        text = (
-            f"{tr('Note')}:\n{snap.get('note','') or '(none)'}\n\n"
-            f"{tr('TODOs')}:\n"
-            f"  1) {todos[0] if len(todos)>0 else ''}\n"
-            f"  2) {todos[1] if len(todos)>1 else ''}\n"
-            f"  3) {todos[2] if len(todos)>2 else ''}\n"
-        )
-        self.tab_overview.setText(text)
+
+        # Build structured HTML overview
+        note_text = snap.get("note", "") or ""
+        note_html = note_text.replace("\n", "<br>") if note_text else f"<span style='color:#555568;'>({tr('No note')})</span>"
+
+        todo_items = ""
+        for i, t in enumerate(todos[:3]):
+            t_str = str(t or "").strip()
+            color = "#e8e8f0" if t_str else "#555568"
+            t_display = t_str if t_str else f"({tr('empty')})"
+            todo_items += f"<div style='padding:4px 0;color:{color};'>{i+1}. {t_display}</div>"
+
+        tag_chips = ""
+        for tag in tags:
+            tag_chips += (
+                f"<span style='background:rgba(108,99,255,0.12);color:#8178ff;"
+                f"padding:2px 8px;border-radius:4px;margin-right:4px;font-size:11px;'>{tag}</span>"
+            )
+
+        html = f"""
+        <div style="font-family:'Segoe UI','Malgun Gothic',sans-serif;color:#e8e8f0;line-height:1.6;">
+            <div style="margin-bottom:12px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;letter-spacing:0.5px;
+                            text-transform:uppercase;margin-bottom:6px;">{tr('Note')}</div>
+                <div style="background:#18181f;border:1px solid #262636;border-radius:8px;
+                            padding:10px 12px;font-size:13px;">{note_html}</div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;letter-spacing:0.5px;
+                            text-transform:uppercase;margin-bottom:6px;">{tr('TODOs')}</div>
+                <div style="background:#18181f;border:1px solid #262636;border-radius:8px;
+                            padding:8px 12px;font-size:13px;">{todo_items}</div>
+            </div>
+            {f'''<div style="margin-bottom:8px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;letter-spacing:0.5px;
+                            text-transform:uppercase;margin-bottom:6px;">{tr('Tags')}</div>
+                <div>{tag_chips}</div>
+            </div>''' if tags else ''}
+        </div>
+        """
+        self.tab_overview.setHtml(html)
 
         self.tab_recent_files.clear()
         for p in (recent or []):

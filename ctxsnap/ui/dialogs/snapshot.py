@@ -1,15 +1,13 @@
 from __future__ import annotations
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List
 from PySide6 import QtCore, QtWidgets
-
 from ctxsnap.i18n import tr
-from ctxsnap.utils import git_title_suggestion
 from ctxsnap.ui.styles import NoScrollComboBox
 
 
 class SnapshotDialog(QtWidgets.QDialog):
+    """Dialog for creating a new snapshot."""
+
     def __init__(
         self,
         parent: QtWidgets.QWidget,
@@ -23,7 +21,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Snapshot"))
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self._templates = templates
         self._imported_payload = None
         self._import_apply_now = False
@@ -81,45 +79,41 @@ class SnapshotDialog(QtWidgets.QDialog):
         pick_btn.clicked.connect(self.pick_folder)
 
         suggest_btn = QtWidgets.QToolButton()
-        suggest_btn.setText(tr("Suggest Title"))
+        suggest_btn.setText(tr("Suggest title"))
         suggest_btn.clicked.connect(self.suggest_title)
 
         root_row = QtWidgets.QHBoxLayout()
         root_row.addWidget(self.root_edit, 1)
         root_row.addWidget(pick_btn)
+        root_row.addWidget(suggest_btn)
 
-        title_row = QtWidgets.QHBoxLayout()
-        title_row.addWidget(self.title_edit, 1)
-        title_row.addWidget(suggest_btn)
+        # TODO section with numbered labels
+        todo_section = QtWidgets.QGroupBox(tr("TODOs"))
+        todo_layout = QtWidgets.QFormLayout(todo_section)
+        todo_layout.setSpacing(8)
+        todo_layout.addRow("1.", self.todo1)
+        todo_layout.addRow("2.", self.todo2)
+        todo_layout.addRow("3.", self.todo3)
 
+        # Form layout
         form = QtWidgets.QFormLayout()
-        form.addRow(tr("Root"), root_row)
-        form.addRow(tr("Title"), title_row)
+        form.setSpacing(10)
+        form.addRow(tr("Root folder"), root_row)
+        form.addRow(tr("Title"), self.title_edit)
         form.addRow(tr("Workspace"), ws_row)
         form.addRow(tr("Note"), self.note_edit)
+        form.addRow(tr("Tags"), self.tags_list)
+        form.addRow("", self.custom_tag)
         form.addRow(tr("Template"), template_row)
 
-        tags_box = QtWidgets.QGroupBox(tr("Tags (optional)"))
-        tags_layout = QtWidgets.QVBoxLayout(tags_box)
-        tags_layout.addWidget(self.tags_list)
-        tags_layout.addWidget(self.custom_tag)
-
-        todo_box = QtWidgets.QGroupBox(tr("Next actions (3 required)"))
-        todo_layout = QtWidgets.QVBoxLayout(todo_box)
-        todo_layout.addWidget(self.todo1)
-        todo_layout.addWidget(self.todo2)
-        todo_layout.addWidget(self.todo3)
-
-        self.err = QtWidgets.QLabel("")
-        self.err.setStyleSheet("color: #ef4444; font-weight: 500;")
-        self.err.setObjectName("ErrorLabel")
-
-        btn_save = QtWidgets.QPushButton("✓ " + tr("Save Snapshot"))
+        # Buttons
+        self.err_label = QtWidgets.QLabel("")
+        self.err_label.setObjectName("ErrorLabel")
+        btn_save = QtWidgets.QPushButton(tr("Save Snapshot"))
         btn_save.setProperty("primary", True)
         btn_cancel = QtWidgets.QPushButton(tr("Cancel"))
-        btn_save.clicked.connect(self.validate_and_accept)
+        btn_save.clicked.connect(self._create)
         btn_cancel.clicked.connect(self.reject)
-
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)
@@ -130,114 +124,117 @@ class SnapshotDialog(QtWidgets.QDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.addLayout(form)
-        layout.addWidget(tags_box)
-        layout.addWidget(todo_box)
-        layout.addWidget(self.err)
+        layout.addWidget(todo_section)
+        layout.addWidget(self.err_label)
         layout.addLayout(btn_row)
 
-        # Prefill (used by Quick Snapshot / hotkey)
-        if prefill and isinstance(prefill, dict):
-            try:
-                root = str(prefill.get("root") or "").strip()
-                if root:
-                    self.root_edit.setText(root)
-                ws = str(prefill.get("vscode_workspace") or "").strip()
-                if ws:
-                    self.workspace_edit.setText(ws)
-                note = str(prefill.get("note") or "")
-                if note:
-                    self.note_edit.setPlainText(note)
-                todos = prefill.get("todos") if isinstance(prefill.get("todos"), list) else []
-                todo_vals = [str(x or "") for x in (todos or [])][:3]
-                while len(todo_vals) < 3:
-                    todo_vals.append("")
-                self.todo1.setText(todo_vals[0])
-                self.todo2.setText(todo_vals[1])
-                self.todo3.setText(todo_vals[2])
-
-                tags = prefill.get("tags") if isinstance(prefill.get("tags"), list) else []
-                tag_set = {str(x).strip() for x in (tags or []) if str(x).strip()}
-                # First apply to existing items.
+        # Pre-fill if provided (for quick snapshot, etc.)
+        if prefill:
+            if prefill.get("root"):
+                self.root_edit.setText(str(prefill["root"]))
+            if prefill.get("title"):
+                self.title_edit.setText(str(prefill["title"]))
+            if prefill.get("note"):
+                self.note_edit.setText(str(prefill["note"]))
+            todos = prefill.get("todos", [])
+            if len(todos) >= 1:
+                self.todo1.setText(str(todos[0]))
+            if len(todos) >= 2:
+                self.todo2.setText(str(todos[1]))
+            if len(todos) >= 3:
+                self.todo3.setText(str(todos[2]))
+            for tag in prefill.get("tags", []):
+                found = False
                 for i in range(self.tags_list.count()):
                     it = self.tags_list.item(i)
-                    it.setCheckState(QtCore.Qt.Checked if it.text() in tag_set else QtCore.Qt.Unchecked)
-                    tag_set.discard(it.text())
-                # Add any remaining tags not in the provided list.
-                for t in sorted(tag_set):
-                    it = QtWidgets.QListWidgetItem(t)
+                    if it.text() == tag:
+                        it.setCheckState(QtCore.Qt.Checked)
+                        found = True
+                        break
+                if not found:
+                    it = QtWidgets.QListWidgetItem(tag)
                     it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
                     it.setCheckState(QtCore.Qt.Checked)
                     self.tags_list.addItem(it)
-            except Exception:
-                # Prefill should never prevent the dialog from opening.
-                pass
-            # Quick Snapshot flow: guide user to next actions immediately.
-            self.todo1.setFocus()
-        else:
-            # New Snapshot flow: title first.
-            self.title_edit.setFocus()
 
-    def pick_folder(self):
-        path = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Select folder"), self.root_edit.text() or str(Path.home()))
+    def pick_folder(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Select Root Folder"), self.root_edit.text())
+        if folder:
+            self.root_edit.setText(folder)
+
+    def pick_workspace(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, tr("Select Workspace"), self.root_edit.text(), "Workspace files (*.code-workspace)")
         if path:
-            self.root_edit.setText(path)
+            self.workspace_edit.setText(path)
 
-    def pick_workspace(self):
-        start = self.root_edit.text().strip() or str(Path.home())
-        f, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            tr("Select VSCode workspace"),
-            start,
-            "VSCode Workspace (*.code-workspace);;All Files (*)",
-        )
-        if f:
-            self.workspace_edit.setText(f)
-
-    def add_custom_tag(self):
-        t = self.custom_tag.text().strip()
-        if not t:
+    def suggest_title(self) -> None:
+        from pathlib import Path
+        from ctxsnap.utils import git_title_suggestion
+        root = self.root_edit.text().strip()
+        if not root:
             return
-        # prevent duplicates
+        sug = git_title_suggestion(Path(root))
+        if sug:
+            self.title_edit.setText(sug)
+
+    def add_custom_tag(self) -> None:
+        tag = self.custom_tag.text().strip()
+        if not tag:
+            return
         for i in range(self.tags_list.count()):
-            if self.tags_list.item(i).text() == t:
+            if self.tags_list.item(i).text() == tag:
+                self.tags_list.item(i).setCheckState(QtCore.Qt.Checked)
                 self.custom_tag.clear()
                 return
-        it = QtWidgets.QListWidgetItem(t)
+        it = QtWidgets.QListWidgetItem(tag)
         it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
         it.setCheckState(QtCore.Qt.Checked)
         self.tags_list.addItem(it)
         self.custom_tag.clear()
 
-    def suggest_title(self):
-        root = Path(self.root_edit.text().strip()).expanduser()
-        sug = git_title_suggestion(root)
-        if sug:
-            self.title_edit.setText(sug)
-        else:
-            self.title_edit.setText(f"{root.name} - {datetime.now().strftime('%m/%d %H:%M')}")
-
-    def imported_payload(self):
-        return self._imported_payload
-
-    def import_apply_now(self) -> bool:
-        return bool(self._import_apply_now)
-
-    def validate_and_accept(self):
-        root = self.root_edit.text().strip()
-        # root validation
-        if not root or not Path(root).exists():
-            self.err.setText(tr("Root invalid"))
+    def apply_template(self) -> None:
+        idx = self.template_combo.currentIndex() - 1
+        if idx < 0 or idx >= len(self._templates):
             return
-        
-        # TODOS validation
-        todos = [self.todo1.text().strip(), self.todo2.text().strip(), self.todo3.text().strip()]
+        tmpl = self._templates[idx]
+        if tmpl.get("note"):
+            self.note_edit.setText(str(tmpl["note"]))
+        todos = tmpl.get("todos", [])
+        if len(todos) >= 1:
+            self.todo1.setText(str(todos[0]))
+        if len(todos) >= 2:
+            self.todo2.setText(str(todos[1]))
+        if len(todos) >= 3:
+            self.todo3.setText(str(todos[2]))
+        for tag in tmpl.get("tags", []):
+            found = False
+            for i in range(self.tags_list.count()):
+                it = self.tags_list.item(i)
+                if it.text() == tag:
+                    it.setCheckState(QtCore.Qt.Checked)
+                    found = True
+                    break
+            if not found:
+                it = QtWidgets.QListWidgetItem(tag)
+                it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+                it.setCheckState(QtCore.Qt.Checked)
+                self.tags_list.addItem(it)
+
+    def _create(self) -> None:
         if self.enforce_todos:
-            if any(not t for t in todos):
-                self.err.setText(tr("Todos required"))
+            t1 = self.todo1.text().strip()
+            t2 = self.todo2.text().strip()
+            t3 = self.todo3.text().strip()
+            if not (t1 and t2 and t3):
+                self.err_label.setText(tr("TODOs required"))
                 return
         self.accept()
 
     def values(self) -> Dict[str, Any]:
+        from pathlib import Path
+        from datetime import datetime
+        from ctxsnap.utils import git_title_suggestion
+
         root = str(Path(self.root_edit.text().strip()).resolve())
         title = self.title_edit.text().strip()
         workspace = self.workspace_edit.text().strip()
@@ -255,30 +252,10 @@ class SnapshotDialog(QtWidgets.QDialog):
             title = sug or f"{Path(root).name} - {datetime.now().strftime('%m/%d %H:%M')}"
         return {"root": root, "title": title, "workspace": workspace, "note": note, "todos": todos, "tags": tags}
 
-    def apply_template(self):
-        idx = self.template_combo.currentIndex() - 1
-        if idx < 0 or idx >= len(self._templates):
-            return
-        tmpl = self._templates[idx]
-        note = str(tmpl.get("note", "") or "")
-        todos = tmpl.get("todos", []) or []
-        tags = tmpl.get("tags", []) or []
-        if note:
-            self.note_edit.setText(note)
-        if len(todos) >= 1:
-            self.todo1.setText(str(todos[0]))
-        if len(todos) >= 2:
-            self.todo2.setText(str(todos[1]))
-        if len(todos) >= 3:
-            self.todo3.setText(str(todos[2]))
-        for i in range(self.tags_list.count()):
-            it = self.tags_list.item(i)
-            it.setCheckState(QtCore.Qt.Checked if it.text() in tags else QtCore.Qt.Unchecked)
-
 
 class EditSnapshotDialog(SnapshotDialog):
     """Dialog for editing an existing snapshot."""
-    
+
     def __init__(
         self,
         parent: QtWidgets.QWidget,
@@ -289,19 +266,19 @@ class EditSnapshotDialog(SnapshotDialog):
     ):
         super().__init__(
             parent,
-            snapshot.get("root", str(Path.home())),
+            snapshot.get("root", str(__import__("pathlib").Path.home())),
             available_tags,
             templates,
             enforce_todos=enforce_todos,
         )
         self.setWindowTitle(tr("Edit Snapshot"))
         self._snapshot_id = snapshot.get("id", "")
-        
+
         # Populate fields with existing data
         self.title_edit.setText(snapshot.get("title", ""))
         self.workspace_edit.setText(snapshot.get("vscode_workspace", ""))
         self.note_edit.setText(snapshot.get("note", ""))
-        
+
         todos = snapshot.get("todos", [])
         if len(todos) >= 1:
             self.todo1.setText(todos[0])
@@ -309,7 +286,7 @@ class EditSnapshotDialog(SnapshotDialog):
             self.todo2.setText(todos[1])
         if len(todos) >= 3:
             self.todo3.setText(todos[2])
-        
+
         # Check existing tags
         existing_tags = set(snapshot.get("tags", []))
         for i in range(self.tags_list.count()):
@@ -317,13 +294,10 @@ class EditSnapshotDialog(SnapshotDialog):
             if it.text() in existing_tags:
                 it.setCheckState(QtCore.Qt.Checked)
                 existing_tags.discard(it.text())
-        
+
         # Add any tags that weren't in the available list
         for tag in existing_tags:
             it = QtWidgets.QListWidgetItem(tag)
             it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
             it.setCheckState(QtCore.Qt.Checked)
             self.tags_list.addItem(it)
-    
-    def snapshot_id(self) -> str:
-        return self._snapshot_id

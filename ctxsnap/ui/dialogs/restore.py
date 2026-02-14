@@ -1,181 +1,137 @@
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from PySide6 import QtCore, QtWidgets
 from ctxsnap.i18n import tr
 
 
 class RestorePreviewDialog(QtWidgets.QDialog):
-    def __init__(
-        self,
-        parent: QtWidgets.QWidget,
-        snap: Dict[str, Any],
-        open_folder: bool,
-        open_terminal: bool,
-        open_vscode: bool,
-        open_running_apps: bool,
-    ):
-        super().__init__(parent)
-        self.setWindowTitle(tr("Restore preview"))
-        self.setModal(True)
-        self.setMinimumWidth(700)
-        self.setMinimumHeight(500)
+    """Preview dialog shown before restoring a snapshot."""
 
-        # Title section
-        title = QtWidgets.QLabel("🔄 " + snap.get("title", "Snapshot"))
+    def __init__(self, parent: QtWidgets.QWidget, snapshot: Dict[str, Any], restore_opts: Dict[str, Any]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Restore Preview"))
+        self.setModal(True)
+        self.setMinimumSize(600, 440)
+
+        title = QtWidgets.QLabel(tr("Restore Preview"))
         title.setObjectName("TitleLabel")
 
-        hint = QtWidgets.QLabel(tr("Restore hint"))
-        hint.setObjectName("HintLabel")
+        # Snapshot info rendered as structured HTML
+        snap_title = snapshot.get("title", "")
+        snap_root = snapshot.get("root", "")
+        snap_created = snapshot.get("created_at", "")
+        snap_note = snapshot.get("note", "") or ""
+        todos = snapshot.get("todos", [])
+        todo_html = "".join(f"<div style='padding:2px 0;'>{i+1}. {str(t or '').strip() or '(empty)'}</div>" for i, t in enumerate(todos[:3]))
 
-        # Restore options groupbox
-        options_group = QtWidgets.QGroupBox(tr("Restore Options"))
-        options_layout = QtWidgets.QVBoxLayout(options_group)
-        options_layout.setSpacing(8)
-        
-        self.cb_folder = QtWidgets.QCheckBox("📁 " + tr("Open folder"))
-        self.cb_terminal = QtWidgets.QCheckBox("💻 " + tr("Open terminal"))
-        self.cb_vscode = QtWidgets.QCheckBox("🔷 " + tr("Open VSCode"))
-        self.cb_running_apps = QtWidgets.QCheckBox("📱 " + tr("Open running apps"))
-        self.cb_folder.setChecked(open_folder)
-        self.cb_terminal.setChecked(open_terminal)
-        self.cb_vscode.setChecked(open_vscode)
-        self.cb_running_apps.setChecked(open_running_apps)
-        
-        options_layout.addWidget(self.cb_folder)
-        options_layout.addWidget(self.cb_terminal)
-        options_layout.addWidget(self.cb_vscode)
-        options_layout.addWidget(self.cb_running_apps)
+        info_html = f"""
+        <div style="font-family:'Segoe UI','Malgun Gothic',sans-serif;color:#e8e8f0;line-height:1.6;">
+            <div style="font-size:15px;font-weight:600;margin-bottom:8px;">{snap_title}</div>
+            <div style="color:#8888a0;font-size:12px;margin-bottom:12px;">{snap_root}  ·  {snap_created}</div>
+            <div style="background:#18181f;border:1px solid #262636;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">{tr('Note')}</div>
+                <div style="font-size:13px;">{snap_note.replace(chr(10), '<br>') if snap_note else '<span style="color:#555568;">(none)</span>'}</div>
+            </div>
+            <div style="background:#18181f;border:1px solid #262636;border-radius:8px;padding:10px 12px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">{tr('TODOs')}</div>
+                {todo_html}
+            </div>
+        </div>
+        """
 
-        root = snap.get("root", "")
-        note = snap.get("note", "")
-        todos = snap.get("todos", [])
-        recent = snap.get("recent_files", [])
-        running_apps = snap.get("running_apps", [])
-        
-        # Apps list (if any)
-        self.apps_list = QtWidgets.QListWidget()
-        self.apps_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.apps_list.setMaximumHeight(120)
-        for app in running_apps:
-            label = f"  {app.get('name','')}  •  {app.get('exe','')}"
-            item = QtWidgets.QListWidgetItem(label)
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-            item.setCheckState(QtCore.Qt.Checked if open_running_apps else QtCore.Qt.Unchecked)
-            item.setData(QtCore.Qt.UserRole, app)
-            self.apps_list.addItem(item)
+        info_view = QtWidgets.QTextBrowser()
+        info_view.setHtml(info_html)
+        info_view.setReadOnly(True)
+        info_view.setOpenExternalLinks(False)
 
-        def _sync_apps_enabled() -> None:
-            enabled = bool(self.cb_running_apps.isChecked())
-            self.apps_list.setEnabled(enabled)
-            # Bulk check/uncheck for a predictable UX
-            for i in range(self.apps_list.count()):
-                it = self.apps_list.item(i)
-                it.setCheckState(QtCore.Qt.Checked if enabled else QtCore.Qt.Unchecked)
+        # Restore options
+        self.opt_folder = QtWidgets.QCheckBox(tr("Open folder on restore"))
+        self.opt_terminal = QtWidgets.QCheckBox(tr("Open terminal on restore"))
+        self.opt_vscode = QtWidgets.QCheckBox(tr("Open VSCode on restore"))
+        self.opt_running_apps = QtWidgets.QCheckBox(tr("Restore apps on restore"))
 
-        self.cb_running_apps.stateChanged.connect(lambda _state: _sync_apps_enabled())
-        _sync_apps_enabled()
+        self.opt_folder.setChecked(bool(restore_opts.get("open_folder", True)))
+        self.opt_terminal.setChecked(bool(restore_opts.get("open_terminal", True)))
+        self.opt_vscode.setChecked(bool(restore_opts.get("open_vscode", True)))
+        self.opt_running_apps.setChecked(bool(restore_opts.get("open_running_apps", False)))
 
-        # Snapshot info display
-        info = QtWidgets.QTextEdit()
-        info.setReadOnly(True)
-        info.setPlaceholderText(tr("Snapshot details"))
-        
-        todo_text = "\n".join([f"  {i+1}. {t}" for i, t in enumerate(todos[:3]) if t])
-        recent_text = "\n".join([f"  • {p}" for p in recent[:8]])
-        apps_text = "\n".join([f"  • {p.get('name','')}  →  {p.get('exe','')}" for p in running_apps[:6]])
-        
-        info.setText(
-            f"📂 Root:\n  {root}\n\n"
-            f"📝 Note:\n  {note or '(none)'}\n\n"
-            f"📋 TODOs:\n{todo_text or '  (none)'}\n\n"
-            f"📁 Recent files ({len(recent)} total, showing top 8):\n{recent_text or '  (none)'}\n\n"
-            f"📱 Running apps ({len(running_apps)} total, showing top 6):\n{apps_text or '  (none)'}"
-        )
+        opts_box = QtWidgets.QGroupBox(tr("Restore Options"))
+        opts_layout = QtWidgets.QVBoxLayout(opts_box)
+        opts_layout.setSpacing(6)
+        opts_layout.addWidget(self.opt_folder)
+        opts_layout.addWidget(self.opt_terminal)
+        opts_layout.addWidget(self.opt_vscode)
+        opts_layout.addWidget(self.opt_running_apps)
 
-        # Buttons
-        btn_restore = QtWidgets.QPushButton("▶ " + tr("Restore"))
+        btn_restore = QtWidgets.QPushButton(tr("Restore"))
         btn_restore.setProperty("primary", True)
         btn_cancel = QtWidgets.QPushButton(tr("Cancel"))
         btn_restore.clicked.connect(self.accept)
         btn_cancel.clicked.connect(self.reject)
-
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_restore)
 
-        # Main layout
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(title)
-        layout.addWidget(hint)
-        layout.addSpacing(8)
-        layout.addWidget(options_group)
-        
-        if running_apps:
-            apps_label = QtWidgets.QLabel("📱 " + tr("Running apps to restore"))
-            apps_label.setObjectName("SubtitleLabel")
-            layout.addWidget(apps_label)
-            layout.addWidget(self.apps_list)
-            
-        layout.addSpacing(8)
-        layout.addWidget(info, 1)
+        layout.addWidget(info_view, 1)
+        layout.addWidget(opts_box)
         layout.addLayout(btn_row)
 
-    def choices(self) -> Dict[str, Any]:
-        selected_apps = []
-        for i in range(self.apps_list.count()):
-            it = self.apps_list.item(i)
-            if it.checkState() == QtCore.Qt.Checked:
-                selected_apps.append(it.data(QtCore.Qt.UserRole))
+    def restore_options(self) -> Dict[str, bool]:
         return {
-            "open_folder": self.cb_folder.isChecked(),
-            "open_terminal": self.cb_terminal.isChecked(),
-            "open_vscode": self.cb_vscode.isChecked(),
-            "open_running_apps": self.cb_running_apps.isChecked(),
-            # Always include the key; empty list must be respected by caller.
-            "running_apps": selected_apps,
+            "open_folder": bool(self.opt_folder.isChecked()),
+            "open_terminal": bool(self.opt_terminal.isChecked()),
+            "open_vscode": bool(self.opt_vscode.isChecked()),
+            "open_running_apps": bool(self.opt_running_apps.isChecked()),
         }
 
 
 class ChecklistDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget, todos: List[str]) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Checklist"))
-        self.setModal(True)
-        self.setMinimumWidth(480)
-        self.setMinimumHeight(320)
+    """Post-restore checklist dialog."""
 
-        title = QtWidgets.QLabel("✅ " + tr("Post-restore checklist"))
+    def __init__(self, parent: QtWidgets.QWidget, items: List[str]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Post-Restore Checklist"))
+        self.setModal(True)
+        self.setMinimumSize(460, 360)
+
+        title = QtWidgets.QLabel(tr("Post-Restore Checklist"))
         title.setObjectName("TitleLabel")
-        
-        hint = QtWidgets.QLabel(tr("Checklist hint"))
+        hint = QtWidgets.QLabel(tr("Check off completed items"))
         hint.setObjectName("HintLabel")
 
-        self.listw = QtWidgets.QListWidget()
-        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        for i, t in enumerate(todos):
-            if t:  # Skip empty todos
-                it = QtWidgets.QListWidgetItem(f"  {i+1}. {t}")
-                it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
-                it.setCheckState(QtCore.Qt.Unchecked)
-                self.listw.addItem(it)
+        self.checks: List[QtWidgets.QCheckBox] = []
+        checklist_widget = QtWidgets.QWidget()
+        check_layout = QtWidgets.QVBoxLayout(checklist_widget)
+        check_layout.setSpacing(8)
+        check_layout.setContentsMargins(8, 8, 8, 8)
+        for item in items:
+            cb = QtWidgets.QCheckBox(item)
+            check_layout.addWidget(cb)
+            self.checks.append(cb)
+        check_layout.addStretch(1)
 
-        btn_ok = QtWidgets.QPushButton("✓ " + tr("Done"))
-        btn_ok.setProperty("primary", True)
-        btn_ok.clicked.connect(self.accept)
-        
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(checklist_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        btn_done = QtWidgets.QPushButton(tr("Done"))
+        btn_done.setProperty("primary", True)
+        btn_done.clicked.connect(self.accept)
         btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(10)
         btn_row.addStretch(1)
-        btn_row.addWidget(btn_ok)
+        btn_row.addWidget(btn_done)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(title)
         layout.addWidget(hint)
-        layout.addWidget(self.listw, 1)
+        layout.addWidget(scroll, 1)
         layout.addLayout(btn_row)

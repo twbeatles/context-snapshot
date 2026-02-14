@@ -13,18 +13,19 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
         self.setModal(True)
         self.setMinimumSize(680, 480)
 
-        title = QtWidgets.QLabel("📋 " + tr("Restore History"))
+        title = QtWidgets.QLabel(tr("Restore History"))
         title.setObjectName("TitleLabel")
 
         self.listw = QtWidgets.QListWidget()
         self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.detail = QtWidgets.QTextEdit()
+        self.detail = QtWidgets.QTextBrowser()
         self.detail.setReadOnly(True)
+        self.detail.setOpenExternalLinks(False)
         self.detail.setPlaceholderText(tr("Select a restore entry to view details."))
 
         self._items = history.get("restores", []) if isinstance(history.get("restores"), list) else []
         for entry in self._items:
-            label = f"🕐 {entry.get('created_at','')}  •  {entry.get('snapshot_id','')}"
+            label = f"{entry.get('created_at', '')}  ·  {entry.get('snapshot_id', '')}"
             self.listw.addItem(label)
 
         self.listw.currentRowChanged.connect(self._on_select)
@@ -49,23 +50,34 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             self.detail.clear()
             return
         entry = self._items[row]
-        lines = [
-            f"📝 Snapshot ID: {entry.get('snapshot_id','')}",
-            f"🕐 Created: {entry.get('created_at','')}",
-            "",
-            "📂 Actions:",
-            f"   • Open folder: {'✓' if entry.get('open_folder') else '✗'}",
-            f"   • Open terminal: {'✓' if entry.get('open_terminal') else '✗'}",
-            f"   • Open VSCode: {'✓' if entry.get('open_vscode') else '✗'}",
-            f"   • Restore apps: {'✓' if entry.get('open_running_apps') else '✗'}",
-            "",
-            "📊 Results:",
-            f"   • Apps requested: {entry.get('running_apps_requested', 0)}",
-            f"   • Apps failed: {entry.get('running_apps_failed', 0)}",
-            f"   • Root missing: {'Yes' if entry.get('root_missing') else 'No'}",
-            f"   • VSCode opened: {'Yes' if entry.get('vscode_opened') else 'No'}",
-        ]
-        self.detail.setText("\n".join(str(line) for line in lines))
+
+        def _yn(val: Any) -> str:
+            return "Yes" if val else "No"
+
+        html = f"""
+        <div style="font-family:'Segoe UI','Malgun Gothic',sans-serif;color:#e8e8f0;line-height:1.8;">
+            <div style="margin-bottom:12px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Snapshot</div>
+                <div>ID: {entry.get('snapshot_id', '')}</div>
+                <div>Created: {entry.get('created_at', '')}</div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Actions</div>
+                <div>Open folder: {_yn(entry.get('open_folder'))}</div>
+                <div>Open terminal: {_yn(entry.get('open_terminal'))}</div>
+                <div>Open VSCode: {_yn(entry.get('open_vscode'))}</div>
+                <div>Restore apps: {_yn(entry.get('open_running_apps'))}</div>
+            </div>
+            <div>
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Results</div>
+                <div>Apps requested: {entry.get('running_apps_requested', 0)}</div>
+                <div>Apps failed: {entry.get('running_apps_failed', 0)}</div>
+                <div>Root missing: {_yn(entry.get('root_missing'))}</div>
+                <div>VSCode opened: {_yn(entry.get('vscode_opened'))}</div>
+            </div>
+        </div>
+        """
+        self.detail.setHtml(html)
 
 
 class CompareDialog(QtWidgets.QDialog):
@@ -77,7 +89,7 @@ class CompareDialog(QtWidgets.QDialog):
         self._snaps = snapshots
         self._loader = loader
 
-        title = QtWidgets.QLabel("🔍 " + tr("Compare two snapshots"))
+        title = QtWidgets.QLabel(tr("Compare two snapshots"))
         title.setObjectName("TitleLabel")
 
         # Combo boxes with labels
@@ -85,11 +97,11 @@ class CompareDialog(QtWidgets.QDialog):
         label_a.setObjectName("SubtitleLabel")
         label_b = QtWidgets.QLabel("B:")
         label_b.setObjectName("SubtitleLabel")
-        
+
         self.left_combo = NoScrollComboBox()
         self.right_combo = NoScrollComboBox()
         for snap in snapshots:
-            label = f"{snap.get('title','')}  •  {snap.get('created_at','')}"
+            label = f"{snap.get('title', '')}  ·  {snap.get('created_at', '')}"
             self.left_combo.addItem(label)
             self.right_combo.addItem(label)
 
@@ -109,12 +121,12 @@ class CompareDialog(QtWidgets.QDialog):
         self.diff_view.setReadOnly(True)
         self.diff_view.setPlaceholderText(tr("Click Compare to see differences"))
 
-        btn_compare = QtWidgets.QPushButton("⚡ " + tr("Compare"))
+        btn_compare = QtWidgets.QPushButton(tr("Compare"))
         btn_compare.setProperty("primary", True)
         btn_compare.clicked.connect(self._run_compare)
         btn_close = QtWidgets.QPushButton(tr("Close"))
         btn_close.clicked.connect(self.accept)
-        
+
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)
@@ -131,27 +143,27 @@ class CompareDialog(QtWidgets.QDialog):
 
     def _serialize(self, snap: Dict[str, Any]) -> List[str]:
         lines = [
-            f"Title: {snap.get('title','')}",
-            f"Created: {snap.get('created_at','')}",
-            f"Root: {snap.get('root','')}",
-            f"Note: {snap.get('note','')}",
+            f"Title: {snap.get('title', '')}",
+            f"Created: {snap.get('created_at', '')}",
+            f"Root: {snap.get('root', '')}",
+            f"Note: {snap.get('note', '')}",
             "",
             "TODOs:",
         ]
-        lines.extend([f"  • {t}" for t in snap.get("todos", [])])
+        lines.extend([f"  {i+1}. {t}" for i, t in enumerate(snap.get("todos", []))])
         lines.append("")
         lines.append("Tags: " + ", ".join(snap.get("tags", []) or []))
         lines.append("")
         lines.append("Recent files:")
-        lines.extend([f"  • {p}" for p in snap.get("recent_files", [])[:10]])
+        lines.extend([f"  - {p}" for p in snap.get("recent_files", [])[:10]])
         if len(snap.get("recent_files", [])) > 10:
             lines.append(f"  ... and {len(snap.get('recent_files', [])) - 10} more")
         lines.append("")
         lines.append("Processes:")
-        lines.extend([f"  • {p.get('name','')} → {p.get('exe','')}" for p in snap.get("processes", [])[:10]])
+        lines.extend([f"  - {p.get('name', '')} -> {p.get('exe', '')}" for p in snap.get("processes", [])[:10]])
         lines.append("")
         lines.append("Running apps:")
-        lines.extend([f"  • {p.get('name','')} → {p.get('exe','')}" for p in snap.get("running_apps", [])[:10]])
+        lines.extend([f"  - {p.get('name', '')} -> {p.get('exe', '')}" for p in snap.get("running_apps", [])[:10]])
         return lines
 
     def _run_compare(self) -> None:
@@ -173,5 +185,5 @@ class CompareDialog(QtWidgets.QDialog):
         )
         diff_text = "\n".join(diff)
         if not diff_text.strip():
-            diff_text = "✓ No differences found between the two snapshots."
+            diff_text = "No differences found between the two snapshots."
         self.diff_view.setText(diff_text)
