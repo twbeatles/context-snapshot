@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 from PySide6 import QtWidgets
@@ -295,6 +295,57 @@ def snapshot_mtime(path: Path) -> float:
         return 0.0
 
 
+def parse_search_query(q: str) -> Tuple[Dict[str, Any], List[str]]:
+    """Parse a simple search query language.
+
+    Supported filters (case-insensitive):
+      - tag:<text>
+      - root:<text>
+      - title:<text>
+      - todo:<text>
+      - note:<text>
+      - archived:true|false
+      - pinned:true|false
+
+    Returns:
+      (filters, terms)
+        filters: dict with optional keys above
+        terms: remaining tokens to be applied as AND full-text terms
+    """
+
+    def _parse_bool(s: str) -> Optional[bool]:
+        v = (s or "").strip().lower()
+        if v in ("1", "true", "yes", "y", "on"):
+            return True
+        if v in ("0", "false", "no", "n", "off"):
+            return False
+        return None
+
+    filters: Dict[str, Any] = {}
+    terms: List[str] = []
+    if not q:
+        return filters, terms
+
+    supported = {"tag", "root", "title", "todo", "note", "archived", "pinned"}
+    for tok in [t for t in q.strip().split() if t.strip()]:
+        if ":" in tok:
+            k, v = tok.split(":", 1)
+            key = k.strip().lower()
+            val = v.strip()
+            if key in supported and val:
+                if key in ("archived", "pinned"):
+                    b = _parse_bool(val)
+                    if b is None:
+                        terms.append(tok.lower())
+                    else:
+                        filters[key] = b
+                else:
+                    filters.setdefault(key, []).append(val.lower())
+                continue
+        terms.append(tok.lower())
+    return filters, terms
+
+
 def git_title_suggestion(root: Path) -> Optional[str]:
     git = shutil.which("git")
     if not git:
@@ -330,6 +381,20 @@ def git_state(root: Path) -> Optional[Tuple[str, str]]:
         return branch, sha
     except Exception as e:
         LOGGER.debug("Git state check failed: %s", e)
+        return None
+
+
+def git_dirty(root: Path) -> Optional[bool]:
+    git = shutil.which("git")
+    if not git:
+        return None
+    if not (root / ".git").exists():
+        return None
+    try:
+        out = subprocess.check_output([git, "-C", str(root), "status", "--porcelain"], text=True, timeout=5)
+        return bool(out.strip())
+    except Exception as e:
+        LOGGER.debug("Git dirty check failed: %s", e)
         return None
 
 

@@ -29,6 +29,9 @@ class Snapshot:
     recent_files: List[str]
     processes: List[Dict[str, Any]]
     running_apps: List[Dict[str, Any]]
+    git_branch: str
+    git_sha: str
+    git_dirty: bool
 
 
 def app_dir() -> Path:
@@ -81,8 +84,16 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                         "open_vscode": True,
                         # Default OFF: launching apps from a snapshot can be surprising/risky.
                         "open_running_apps": False,
+                        # Default OFF: opening many files can be noisy/surprising.
+                        "open_recent_files": False,
+                        "open_recent_files_limit": 5,
                         "show_post_restore_checklist": True,
                     },
+                    "terminal": {
+                        "mode": "auto",  # auto|wt|cmd|pwsh|powershell|custom
+                        "custom_argv": ["wt", "-d", "{path}"],
+                    },
+                    "saved_searches": [],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -238,8 +249,19 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     restore.setdefault("open_terminal", True)
     restore.setdefault("open_vscode", True)
     restore.setdefault("open_running_apps", False)
+    restore.setdefault("open_recent_files", False)
+    restore.setdefault("open_recent_files_limit", 5)
     restore.setdefault("show_post_restore_checklist", True)
     settings["restore"] = restore
+    settings.setdefault("terminal", {"mode": "auto", "custom_argv": ["wt", "-d", "{path}"]})
+    if not isinstance(settings.get("terminal"), dict):
+        settings["terminal"] = {"mode": "auto", "custom_argv": ["wt", "-d", "{path}"]}
+    settings["terminal"].setdefault("mode", "auto")
+    settings["terminal"].setdefault("custom_argv", ["wt", "-d", "{path}"])
+    # Search presets
+    settings.setdefault("saved_searches", [])
+    if not isinstance(settings.get("saved_searches"), list):
+        settings["saved_searches"] = []
     # UX
     settings.setdefault("onboarding_shown", False)
     settings.setdefault(
@@ -339,6 +361,10 @@ def migrate_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     snap.setdefault("pinned", False)
     snap.setdefault("archived", False)
     snap.setdefault("running_apps", [])
+    # Git context (best-effort)
+    snap.setdefault("git_branch", "")
+    snap.setdefault("git_sha", "")
+    snap.setdefault("git_dirty", False)
     # Security: imported snapshots may contain untrusted launch commands.
     snap.setdefault("origin", "local")  # "local" | "imported"
     snap.setdefault("imported_at", "")

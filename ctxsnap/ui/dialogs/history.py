@@ -54,6 +54,34 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
         def _yn(val: Any) -> str:
             return "Yes" if val else "No"
 
+        # Backward/forward compatible: failed count may be an int or a list.
+        failed_items: List[str] = []
+        if isinstance(entry.get("running_apps_failed_items"), list):
+            failed_items = [str(x) for x in entry.get("running_apps_failed_items") if str(x)]
+        elif isinstance(entry.get("running_apps_failed"), list):
+            failed_items = [str(x) for x in entry.get("running_apps_failed") if str(x)]
+        failed_count = entry.get("running_apps_failed_count")
+        if isinstance(failed_count, int):
+            fc = failed_count
+        elif isinstance(entry.get("running_apps_failed"), int):
+            fc = int(entry.get("running_apps_failed"))
+        else:
+            fc = len(failed_items)
+
+        failures_html = ""
+        if failed_items:
+            items = "<br>".join(failed_items[:10])
+            more = ""
+            if len(failed_items) > 10:
+                more = f"<div style='color:#8888a0;'>... and {len(failed_items) - 10} more</div>"
+            failures_html = f"""
+            <div style="margin-top:8px;">
+                <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Failures</div>
+                <div style="font-size:12px;color:#e8e8f0;">{items}</div>
+                {more}
+            </div>
+            """
+
         html = f"""
         <div style="font-family:'Segoe UI','Malgun Gothic',sans-serif;color:#e8e8f0;line-height:1.8;">
             <div style="margin-bottom:12px;">
@@ -66,14 +94,16 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
                 <div>Open folder: {_yn(entry.get('open_folder'))}</div>
                 <div>Open terminal: {_yn(entry.get('open_terminal'))}</div>
                 <div>Open VSCode: {_yn(entry.get('open_vscode'))}</div>
+                <div>Open recent files: {_yn(entry.get('open_recent_files'))}</div>
                 <div>Restore apps: {_yn(entry.get('open_running_apps'))}</div>
             </div>
             <div>
                 <div style="font-size:11px;color:#8888a0;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Results</div>
                 <div>Apps requested: {entry.get('running_apps_requested', 0)}</div>
-                <div>Apps failed: {entry.get('running_apps_failed', 0)}</div>
+                <div>Apps failed: {fc}</div>
                 <div>Root missing: {_yn(entry.get('root_missing'))}</div>
                 <div>VSCode opened: {_yn(entry.get('vscode_opened'))}</div>
+                {failures_html}
             </div>
         </div>
         """

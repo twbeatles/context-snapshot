@@ -109,11 +109,17 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_terminal = QtWidgets.QCheckBox(tr("Open terminal on restore"))
         self.rs_vscode = QtWidgets.QCheckBox(tr("Open VSCode on restore"))
         self.rs_running_apps = QtWidgets.QCheckBox(tr("Restore apps on restore"))
+        self.rs_recent_files = QtWidgets.QCheckBox(tr("Open recent files in VSCode"))
+        self.rs_recent_files_limit = NoScrollSpinBox()
+        self.rs_recent_files_limit.setRange(0, 20)
+        self.rs_recent_files_limit.setSuffix(tr("suffix_files"))
         self.rs_checklist = QtWidgets.QCheckBox(tr("Show post-restore checklist"))
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
+        self.rs_recent_files.setChecked(bool(restore.get("open_recent_files", False)))
+        self.rs_recent_files_limit.setValue(int(restore.get("open_recent_files_limit", 5) or 0))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
 
         self.preview_default = QtWidgets.QCheckBox(tr("Show restore preview by default"))
@@ -126,10 +132,27 @@ class SettingsDialog(QtWidgets.QDialog):
         restore_l.addWidget(self.rs_folder)
         restore_l.addWidget(self.rs_terminal)
         restore_l.addWidget(self.rs_vscode)
+        rf_row = QtWidgets.QHBoxLayout()
+        rf_row.setSpacing(8)
+        rf_row.addWidget(self.rs_recent_files, 1)
+        rf_row.addWidget(QtWidgets.QLabel(tr("Recent files to open")))
+        rf_row.addWidget(self.rs_recent_files_limit)
+        restore_l.addLayout(rf_row)
         restore_l.addWidget(self.rs_running_apps)
         restore_l.addWidget(self.rs_checklist)
         restore_l.addSpacing(12)
         restore_l.addWidget(self.preview_default)
+
+        # Recent files in VSCode only makes sense when VSCode restore is enabled.
+        def _sync_recent_files_enabled(vscode_on: bool) -> None:
+            self.rs_recent_files.setEnabled(bool(vscode_on))
+            self.rs_recent_files_limit.setEnabled(bool(vscode_on) and bool(self.rs_recent_files.isChecked()))
+            if not vscode_on:
+                self.rs_recent_files.setChecked(False)
+
+        self.rs_vscode.toggled.connect(_sync_recent_files_enabled)
+        self.rs_recent_files.toggled.connect(lambda on: self.rs_recent_files_limit.setEnabled(bool(self.rs_vscode.isChecked()) and bool(on)))
+        _sync_recent_files_enabled(bool(self.rs_vscode.isChecked()))
         restore_hint = QtWidgets.QLabel(tr("Restore Preview Hint"))
         restore_hint.setObjectName("HintLabel")
         restore_hint.setWordWrap(True)
@@ -274,6 +297,69 @@ class SettingsDialog(QtWidgets.QDialog):
         filter_layout.addRow(tr("Exclude patterns for recent file scan") + ":", self.exclude_patterns)
         filter_layout.addRow(tr("Process Keywords") + ":", self.process_keywords)
 
+        # Terminal settings
+        term = settings.get("terminal", {}) if isinstance(settings.get("terminal"), dict) else {}
+        self.terminal_mode = NoScrollComboBox()
+        self.terminal_mode.addItem(tr("Auto"), "auto")
+        self.terminal_mode.addItem("Windows Terminal (wt)", "wt")
+        self.terminal_mode.addItem("cmd.exe", "cmd")
+        self.terminal_mode.addItem("PowerShell (pwsh)", "pwsh")
+        self.terminal_mode.addItem("Windows PowerShell", "powershell")
+        self.terminal_mode.addItem(tr("Custom"), "custom")
+        mode = str(term.get("mode") or "auto")
+        midx = self.terminal_mode.findData(mode)
+        self.terminal_mode.setCurrentIndex(midx if midx >= 0 else 0)
+
+        self.terminal_custom_argv = QtWidgets.QPlainTextEdit()
+        self.terminal_custom_argv.setPlaceholderText(tr("Terminal custom argv hint"))
+        self.terminal_custom_argv.setMaximumHeight(90)
+        argv0 = term.get("custom_argv") if isinstance(term.get("custom_argv"), list) else ["wt", "-d", "{path}"]
+        self.terminal_custom_argv.setPlainText("\n".join([str(x) for x in argv0 if str(x).strip()]))
+        self.terminal_custom_argv.setEnabled(self.terminal_mode.currentData() == "custom")
+        self.terminal_mode.currentIndexChanged.connect(lambda: self.terminal_custom_argv.setEnabled(self.terminal_mode.currentData() == "custom"))
+
+        term_box = QtWidgets.QGroupBox(tr("Terminal"))
+        term_l = QtWidgets.QFormLayout(term_box)
+        term_l.setSpacing(8)
+        term_l.addRow(tr("Terminal mode") + ":", self.terminal_mode)
+        term_l.addRow(tr("Custom argv") + ":", self.terminal_custom_argv)
+
+        # Saved searches
+        self.saved_searches_list = QtWidgets.QListWidget()
+        self.saved_searches_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.saved_searches_list.setMaximumHeight(150)
+        self.saved_search_name = QtWidgets.QLineEdit()
+        self.saved_search_name.setPlaceholderText(tr("Saved search name"))
+        self.saved_search_query = QtWidgets.QLineEdit()
+        self.saved_search_query.setPlaceholderText(tr("Saved search query"))
+        self.btn_saved_search_add = QtWidgets.QPushButton(tr("Add / Update"))
+        self.btn_saved_search_add.setProperty("primary", True)
+        self.btn_saved_search_remove = QtWidgets.QPushButton(tr("Delete"))
+        self.btn_saved_search_remove.setProperty("danger", True)
+        self.btn_saved_search_add.clicked.connect(self.add_or_update_saved_search)
+        self.btn_saved_search_remove.clicked.connect(self.remove_saved_search)
+        self.saved_searches_list.currentRowChanged.connect(self.load_saved_search_to_form)
+        self._saved_searches_cache: List[Dict[str, str]] = []
+        self._load_saved_searches(settings.get("saved_searches", []))
+
+        ss_form = QtWidgets.QFormLayout()
+        ss_form.setSpacing(8)
+        ss_form.addRow(tr("Name"), self.saved_search_name)
+        ss_form.addRow(tr("Query"), self.saved_search_query)
+
+        ss_btns = QtWidgets.QHBoxLayout()
+        ss_btns.setSpacing(8)
+        ss_btns.addWidget(self.btn_saved_search_add)
+        ss_btns.addWidget(self.btn_saved_search_remove)
+        ss_btns.addStretch(1)
+
+        ss_box = QtWidgets.QGroupBox(tr("Saved searches"))
+        ss_l = QtWidgets.QVBoxLayout(ss_box)
+        ss_l.setSpacing(10)
+        ss_l.addWidget(self.saved_searches_list)
+        ss_l.addLayout(ss_form)
+        ss_l.addLayout(ss_btns)
+
         privacy_hint = QtWidgets.QLabel(tr("Privacy Hint"))
         privacy_hint.setObjectName("HintLabel")
         privacy_hint.setWordWrap(True)
@@ -288,6 +374,8 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addWidget(auto_box)
         general_layout.addWidget(archive_box)
         general_layout.addWidget(filter_box)
+        general_layout.addWidget(term_box)
+        general_layout.addWidget(ss_box)
         general_layout.addWidget(privacy_hint)
         general_layout.addStretch(1)
 
@@ -574,8 +662,20 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
+        self.rs_recent_files.setChecked(bool(restore.get("open_recent_files", False)))
+        self.rs_recent_files_limit.setValue(int(restore.get("open_recent_files_limit", 5) or 0))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
         self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
+
+        term = settings.get("terminal", {}) if isinstance(settings.get("terminal"), dict) else {}
+        mode = str(term.get("mode") or "auto")
+        midx = self.terminal_mode.findData(mode)
+        self.terminal_mode.setCurrentIndex(midx if midx >= 0 else 0)
+        argv0 = term.get("custom_argv") if isinstance(term.get("custom_argv"), list) else ["wt", "-d", "{path}"]
+        self.terminal_custom_argv.setPlainText("\n".join([str(x) for x in argv0 if str(x).strip()]))
+        self.terminal_custom_argv.setEnabled(self.terminal_mode.currentData() == "custom")
+
+        self._load_saved_searches(settings.get("saved_searches", []))
 
         self.recent_spin.setValue(int(settings.get("recent_files_limit", 30)))
         self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
@@ -632,6 +732,56 @@ class SettingsDialog(QtWidgets.QDialog):
         self.template_todo2.clear()
         self.template_todo3.clear()
         self.template_tags.clear()
+
+    def _load_saved_searches(self, saved: Any) -> None:
+        self._saved_searches_cache = []
+        if isinstance(saved, list):
+            for it in saved:
+                if not isinstance(it, dict):
+                    continue
+                name = str(it.get("name") or "").strip()
+                query = str(it.get("query") or "").strip()
+                if not query:
+                    continue
+                self._saved_searches_cache.append({"name": name or "Untitled", "query": query})
+        self.saved_searches_list.clear()
+        for it in self._saved_searches_cache:
+            self.saved_searches_list.addItem(str(it.get("name") or "Untitled"))
+        self.saved_search_name.clear()
+        self.saved_search_query.clear()
+
+    def load_saved_search_to_form(self, row: int) -> None:
+        if row < 0 or row >= len(self._saved_searches_cache):
+            return
+        it = self._saved_searches_cache[row]
+        self.saved_search_name.setText(str(it.get("name") or ""))
+        self.saved_search_query.setText(str(it.get("query") or ""))
+
+    def add_or_update_saved_search(self) -> None:
+        name = self.saved_search_name.text().strip() or "Untitled"
+        query = self.saved_search_query.text().strip()
+        if not query:
+            self.err.setText(tr("Saved search query required"))
+            return
+        self.err.setText("")
+        row = self.saved_searches_list.currentRow()
+        it = {"name": name, "query": query}
+        if row >= 0 and row < len(self._saved_searches_cache):
+            self._saved_searches_cache[row] = it
+            self.saved_searches_list.item(row).setText(name)
+        else:
+            self._saved_searches_cache.append(it)
+            self.saved_searches_list.addItem(name)
+            self.saved_searches_list.setCurrentRow(len(self._saved_searches_cache) - 1)
+
+    def remove_saved_search(self) -> None:
+        row = self.saved_searches_list.currentRow()
+        if row < 0 or row >= len(self._saved_searches_cache):
+            return
+        self._saved_searches_cache.pop(row)
+        self.saved_searches_list.takeItem(row)
+        self.saved_search_name.clear()
+        self.saved_search_query.clear()
 
     def load_template_to_form(self, row: int) -> None:
         if row < 0 or row >= len(self._templates_cache):
@@ -740,6 +890,13 @@ class SettingsDialog(QtWidgets.QDialog):
                 "open_terminal": bool(self.rs_terminal.isChecked()),
                 "open_vscode": bool(self.rs_vscode.isChecked()),
                 "open_running_apps": bool(self.rs_running_apps.isChecked()),
+                "open_recent_files": bool(self.rs_recent_files.isChecked()),
+                "open_recent_files_limit": int(self.rs_recent_files_limit.value()),
                 "show_post_restore_checklist": bool(self.rs_checklist.isChecked()),
             },
+            "terminal": {
+                "mode": self.terminal_mode.currentData(),
+                "custom_argv": [line.strip() for line in self.terminal_custom_argv.toPlainText().splitlines() if line.strip()],
+            },
+            "saved_searches": self._saved_searches_cache,
         }

@@ -31,6 +31,7 @@ from ctxsnap.restore import (
     open_folder,
     open_terminal_at,
     open_vscode_at,
+    open_vscode_files,
     resolve_vscode_target,
 )
 from ctxsnap.ui.dialogs.history import CompareDialog, RestoreHistoryDialog
@@ -42,6 +43,8 @@ from ctxsnap.ui.models import SnapshotDelegate, SnapshotListModel
 from ctxsnap.ui.styles import NoScrollComboBox
 from ctxsnap.utils import (
     build_search_blob,
+    parse_search_query,
+    git_dirty,
     git_state,
     git_title_suggestion,
     list_processes_filtered,
@@ -314,6 +317,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
 
+        # Saved search presets
+        self.search_preset = NoScrollComboBox()
+        self.search_preset.setMinimumWidth(170)
+        self.search_preset.activated.connect(self._apply_search_preset)
+        self._refresh_search_presets()
+
         # --- Filter controls (collapsed by default) ---
         self.selected_tags: Set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
@@ -464,6 +473,7 @@ class MainWindow(QtWidgets.QMainWindow):
         search_row = QtWidgets.QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self.search, 1)
+        search_row.addWidget(self.search_preset)
         search_row.addWidget(self._filter_toggle)
         search_row.addWidget(btn_new)
 
@@ -566,6 +576,40 @@ class MainWindow(QtWidgets.QMainWindow):
         # When False: X closes to tray (hide). Quit must be explicit.
         self._quit_requested = False
         self._tray_hint_shown_session = False
+
+    def _refresh_search_presets(self) -> None:
+        """Refresh the saved-search preset dropdown from settings."""
+        try:
+            current_q = str(self.search.text() or "")
+        except Exception:
+            current_q = ""
+        self.search_preset.blockSignals(True)
+        self.search_preset.clear()
+        self.search_preset.addItem(tr("Search presets"), "")
+        saved = self.settings.get("saved_searches", [])
+        if isinstance(saved, list):
+            for it in saved:
+                if not isinstance(it, dict):
+                    continue
+                name = str(it.get("name") or "").strip() or tr("Untitled")
+                q = str(it.get("query") or "").strip()
+                if not q:
+                    continue
+                self.search_preset.addItem(name, q)
+        # Keep selection stable if possible
+        idx = self.search_preset.findData(current_q)
+        if idx >= 0:
+            self.search_preset.setCurrentIndex(idx)
+        else:
+            self.search_preset.setCurrentIndex(0)
+        self.search_preset.blockSignals(False)
+
+    def _apply_search_preset(self) -> None:
+        q = self.search_preset.currentData()
+        if not isinstance(q, str) or not q.strip():
+            return
+        self.search.setText(q.strip())
+        self.search.setFocus()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         # Default UX: close to tray (hide). Quit must be explicit.
@@ -1005,9 +1049,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.refresh_list(reset_page=False)
 
     def refresh_list(self, *, reset_page: bool = False) -> None:
-        query = self.search.text().strip().lower()
-        pinned_only = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
-        show_archived = bool(self.show_archived.isChecked()) if hasattr(self, "show_archived") else False
+        raw_query = self.search.text().strip()
+        filters, terms = parse_search_query(raw_query)
+        pinned_only_ui = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
+        show_archived_ui = bool(self.show_archived.isChecked()) if hasattr(self, "show_archived") else False
+
+        pinned_filter = filters.get("pinned") if isinstance(filters.get("pinned"), bool) else None
+        archived_filter = filters.get("archived") if isinstance(filters.get("archived"), bool) else None
+
+        # Explicit query filters override the UI toggles.
+        pinned_only = pinned_only_ui or (pinned_filter is True)
+        show_archived = show_archived_ui or (archived_filter is True)
 
         items = list(self.index.get("snapshots", []))
         index_changed = False
@@ -1039,27 +1091,99 @@ class MainWindow(QtWidgets.QMainWindow):
             tags = it.get("tags", []) or []
             if self.selected_tags and not self.selected_tags.intersection(tags):
                 continue
-            if bool(it.get("archived", False)) and not show_archived:
+
+            is_archived = bool(it.get("archived", False))
+            is_pinned = bool(it.get("pinned", False))
+
+            if archived_filter is True and not is_archived:
                 continue
-            base_hay = f"{it.get('title','')} {it.get('root','')} {' '.join(tags)}".lower()
-            if query and query not in base_hay:
-                search_blob = (it.get("search_blob") or "").lower()
-                snap_mtime = 0.0
-                if it.get("id"):
-                    snap_mtime = snapshot_mtime(self.snap_path(it["id"]))
-                if it.get("search_blob_mtime", 0.0) < snap_mtime:
-                    search_blob = ""
-                if not search_blob and it.get("id"):
-                    snap = self.load_snapshot(it.get("id"))
-                    if snap:
-                        search_blob = build_search_blob(snap)
-                        it["search_blob"] = search_blob
-                        it["search_blob_mtime"] = snap_mtime or snapshot_mtime(self.snap_path(it["id"]))
-                        index_changed = True
-                if not search_blob or query not in search_blob:
+            if archived_filter is False and is_archived:
+                continue
+            if is_archived and not show_archived:
+                continue
+
+            if pinned_filter is True and not is_pinned:
+                continue
+            if pinned_filter is False and is_pinned:
+                continue
+            if pinned_only and not is_pinned:
+                continue
+
+            title_l = str(it.get("title", "")).lower()
+            root_l = str(it.get("root", "")).lower()
+            tags_l = [str(t).lower() for t in (tags or [])]
+
+            # Apply structured filters (AND semantics within each key).
+            ok = True
+            for v in filters.get("title", []) if isinstance(filters.get("title"), list) else []:
+                if v not in title_l:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for v in filters.get("root", []) if isinstance(filters.get("root"), list) else []:
+                if v not in root_l:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for v in filters.get("tag", []) if isinstance(filters.get("tag"), list) else []:
+                if not any(v in t for t in tags_l):
+                    ok = False
+                    break
+            if not ok:
+                continue
+
+            need_snap = bool(filters.get("todo")) or bool(filters.get("note"))
+            snap = None
+            if need_snap and it.get("id"):
+                snap = self.load_snapshot(it.get("id"))
+                if not snap:
+                    ok = False
+            if not ok:
+                continue
+            if snap:
+                note_l = str(snap.get("note", "") or "").lower()
+                todos_l = [str(x or "").lower() for x in (snap.get("todos", []) or [])]
+                for v in filters.get("note", []) if isinstance(filters.get("note"), list) else []:
+                    if v not in note_l:
+                        ok = False
+                        break
+                if not ok:
+                    continue
+                for v in filters.get("todo", []) if isinstance(filters.get("todo"), list) else []:
+                    if not any(v in t for t in todos_l):
+                        ok = False
+                        break
+                if not ok:
                     continue
 
-            if pinned_only and not bool(it.get("pinned", False)):
+            # Full-text terms: title/root/tags + cached snapshot blob (AND semantics).
+            base_hay = f"{title_l} {root_l} {' '.join(tags_l)}"
+            search_blob = None
+            snap_mtime = 0.0
+            if it.get("id"):
+                snap_mtime = snapshot_mtime(self.snap_path(it["id"]))
+            for term in terms:
+                if not term:
+                    continue
+                if term in base_hay:
+                    continue
+                if search_blob is None:
+                    search_blob = (it.get("search_blob") or "").lower()
+                    if it.get("search_blob_mtime", 0.0) < snap_mtime:
+                        search_blob = ""
+                    if not search_blob and it.get("id"):
+                        snap2 = snap or self.load_snapshot(it.get("id"))
+                        if snap2:
+                            search_blob = build_search_blob(snap2)
+                            it["search_blob"] = search_blob
+                            it["search_blob_mtime"] = snap_mtime or snapshot_mtime(self.snap_path(it["id"]))
+                            index_changed = True
+                if not search_blob or term not in search_blob:
+                    ok = False
+                    break
+            if not ok:
                 continue
 
             if day_cutoff:
@@ -1436,6 +1560,15 @@ class MainWindow(QtWidgets.QMainWindow):
         snapshot_note = note if capture_note else ""
         snapshot_todos = todos[:3] if capture_todos else ["", "", ""]
         process_keywords = self.settings.get("process_keywords", [])
+        g_branch = ""
+        g_sha = ""
+        g_dirty = False
+        st = git_state(root_path)
+        if st:
+            g_branch, g_sha = st
+            gd = git_dirty(root_path)
+            if gd is not None:
+                g_dirty = bool(gd)
         snap = Snapshot(
             id=sid,
             title=title,
@@ -1450,6 +1583,9 @@ class MainWindow(QtWidgets.QMainWindow):
             recent_files=recent_files,
             processes=list_processes_filtered(process_keywords) if capture_processes else [],
             running_apps=list_running_apps() if capture_running_apps else [],
+            git_branch=g_branch,
+            git_sha=g_sha,
+            git_dirty=g_dirty,
         )
         self.save_snapshot(snap)
         if capture_recent and background_recent:
@@ -1531,6 +1667,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Refresh tag filter
         self._build_tag_menu()
+        self._refresh_search_presets()
         self._reset_pagination_and_refresh()
 
         # Update labels
@@ -1783,18 +1920,18 @@ class MainWindow(QtWidgets.QMainWindow):
         open_terminal_default = bool(restore_cfg.get("open_terminal", True))
         open_vscode_default = bool(restore_cfg.get("open_vscode", True))
         open_running_apps_default = bool(restore_cfg.get("open_running_apps", False))
+        open_recent_files_default = bool(restore_cfg.get("open_recent_files", False))
         show_checklist = bool(restore_cfg.get("show_post_restore_checklist", True))
         preview_default = bool(self.settings.get("restore_preview_default", True))
 
         if preview_default:
-            dlg = RestorePreviewDialog(
-                self,
-                snap,
-                open_folder_default,
-                open_terminal_default,
-                open_vscode_default,
-                open_running_apps_default,
-            )
+            dlg = RestorePreviewDialog(self, snap, {
+                "open_folder": open_folder_default,
+                "open_terminal": open_terminal_default,
+                "open_vscode": open_vscode_default,
+                "open_running_apps": open_running_apps_default,
+                "open_recent_files": open_recent_files_default,
+            })
             if dlg.exec() != QtWidgets.QDialog.Accepted:
                 return
             ch = dlg.choices()
@@ -1804,6 +1941,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "open_terminal": open_terminal_default,
                 "open_vscode": open_vscode_default,
                 "open_running_apps": open_running_apps_default,
+                "open_recent_files": open_recent_files_default,
             }
 
         root = Path(snap["root"]).expanduser()
@@ -1818,7 +1956,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 errors.append(f"{tr('Restore open folder failed')} {error}")
         
         if ch.get("open_terminal"):
-            success, error = open_terminal_at(root)
+            success, error = open_terminal_at(root, self.settings.get("terminal", {}))
             if not success:
                 root_missing = True
                 errors.append(f"{tr('Restore open terminal failed')} {error}")
@@ -1830,6 +1968,28 @@ class MainWindow(QtWidgets.QMainWindow):
             vscode_opened = success
             if not success:
                 errors.append(f"{tr('Restore open vscode failed')} {error}")
+            else:
+                if bool(ch.get("open_recent_files")):
+                    limit = int(restore_cfg.get("open_recent_files_limit", 5) or 0)
+                    limit = max(0, min(limit, 20))
+                    if limit > 0:
+                        rf = snap.get("recent_files", []) if isinstance(snap.get("recent_files"), list) else []
+                        files = []
+                        for p in rf:
+                            try:
+                                pp = Path(str(p)).expanduser()
+                                if pp.exists() and pp.is_file():
+                                    files.append(pp)
+                            except Exception:
+                                continue
+                            if len(files) >= limit:
+                                break
+                        if files:
+                            ok2, err2 = open_vscode_files(files)
+                            if not ok2:
+                                errors.append(f"{tr('Restore open vscode failed')} {err2}")
+                        else:
+                            self.statusBar().showMessage(tr("No recent files to open"), 3500)
         
         requested_apps = []
         running_app_failures: List[str] = []
@@ -1864,8 +2024,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "open_terminal": bool(ch.get("open_terminal")),
             "open_vscode": bool(ch.get("open_vscode")),
             "open_running_apps": bool(ch.get("open_running_apps")),
+            "open_recent_files": bool(ch.get("open_recent_files")),
             "running_apps_requested": len(requested_apps),
-            "running_apps_failed": running_app_failures,
+            "running_apps_failed_count": len(running_app_failures),
+            "running_apps_failed_items": running_app_failures,
             "root_missing": root_missing,
             "vscode_opened": vscode_opened,
             "running_apps_skipped": apps_restore_skipped,
