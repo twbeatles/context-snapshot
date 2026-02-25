@@ -59,7 +59,7 @@ def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSyste
             win.activateWindow()
 
     act_show.triggered.connect(toggle_show)
-    act_quit.triggered.connect(app.quit)
+    act_quit.triggered.connect(win.request_quit)
 
     tray.setContextMenu(menu)
     # keep references for live updates
@@ -71,6 +71,7 @@ def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSyste
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     set_pretty_style(app)
     app.setStyleSheet(APP_QSS)
 
@@ -87,7 +88,8 @@ def main() -> None:
 
     _, _, settings_path = ensure_storage()
     settings = migrate_settings(load_json(settings_path))
-    save_json(settings_path, settings)
+    if not save_json(settings_path, settings):
+        LOGGER.warning("Failed to save migrated settings at startup.")
 
     set_language(settings.get("language"))
     win = MainWindow()
@@ -98,7 +100,8 @@ def main() -> None:
         dlg = OnboardingDialog(win)
         dlg.exec()
         win.settings["onboarding_shown"] = True
-        save_json(win.settings_path, win.settings)
+        if not save_json(win.settings_path, win.settings):
+            LOGGER.warning("Failed to save onboarding flag.")
 
         # Keep menu/hotkey label consistent after onboarding
         win._build_menus()
@@ -155,13 +158,15 @@ def main() -> None:
                         if register_hotkey(hotkey_id, cand["ctrl"], cand["alt"], cand["shift"], cand["vk"]):
                             win.settings.setdefault("hotkey", {})
                             win.settings["hotkey"].update({"enabled": True, **cand})
-                            save_json(win.settings_path, win.settings)
+                            if not save_json(win.settings_path, win.settings):
+                                LOGGER.warning("Failed to persist updated hotkey candidate.")
                             win.statusBar().showMessage(f"{tr('Hotkey updated to')} {win.hotkey_label()}", 4500)
                             break
                 elif dlg.clickedButton() == btn_disable:
                     win.settings.setdefault("hotkey", {})
                     win.settings["hotkey"].update({"enabled": False})
-                    save_json(win.settings_path, win.settings)
+                    if not save_json(win.settings_path, win.settings):
+                        LOGGER.warning("Failed to persist hotkey disable option.")
                     unregister_hotkey(hotkey_id)
                     win.statusBar().showMessage(tr("Hotkey disabled"), 3500)
             except Exception as e:

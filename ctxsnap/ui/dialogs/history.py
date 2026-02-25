@@ -49,6 +49,15 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             self.detail.clear()
             return
         entry = self._items[row]
+        failed_raw = entry.get("running_apps_failed")
+        failed_count = entry.get("running_apps_failed_count")
+        if failed_count is None:
+            if isinstance(failed_raw, list):
+                failed_count = len(failed_raw)
+            elif isinstance(failed_raw, (int, float)):
+                failed_count = int(failed_raw)
+            else:
+                failed_count = 0
         lines = [
             f"📝 Snapshot ID: {entry.get('snapshot_id','')}",
             f"🕐 Created: {entry.get('created_at','')}",
@@ -61,7 +70,7 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             "",
             "📊 Results:",
             f"   • Apps requested: {entry.get('running_apps_requested', 0)}",
-            f"   • Apps failed: {entry.get('running_apps_failed', 0)}",
+            f"   • Apps failed: {failed_count}",
             f"   • Root missing: {'Yes' if entry.get('root_missing') else 'No'}",
             f"   • VSCode opened: {'Yes' if entry.get('vscode_opened') else 'No'}",
         ]

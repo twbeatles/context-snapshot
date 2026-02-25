@@ -45,6 +45,9 @@
 | **Templates** | Save frequently used configurations |
 | **Snapshot Comparison** | Compare differences between two snapshots |
 | **Backup/Restore** | Backup settings and snapshot data |
+| **Restore History** | Review and re-run recent restore actions |
+| **Onboarding** | Built-in first-run usage guide |
+| **Bilingual UI** | Korean/English support (auto-detect + manual switch) |
 
 ---
 
@@ -101,7 +104,7 @@ python ctxsnap_win.py
    - ✅ Open folder
    - ✅ Open terminal
    - ✅ Open VSCode
-   - ✅ Restore running apps
+   - ⬜ Restore running apps (disabled by default)
 4. Click **Execute Restore**
 
 #### 3. Using the Global Hotkey
@@ -222,12 +225,15 @@ Automatically create snapshots without manual saving.
 **Periodic Auto Snapshot:**
 1. Settings → General tab
 2. Set **Auto snapshot interval (minutes)** (0 = disabled)
-3. Example: Enter `30` for auto-save every 30 minutes
+3. Example: Enter `30` for auto-save every 30 minutes (headless, no dialog)
 
 **Git Change Detection:**
 1. Settings → General tab
 2. Check **Auto snapshot on Git change**
-3. Auto-saves when Git status (branch, commit, etc.) changes
+3. Auto-saves when Git status (branch, commit, etc.) changes (headless, no dialog)
+
+**Auto-save deduplication:**
+- If the core context (root/workspace/note/TODO/tags/Git state) has not changed, auto snapshot is skipped.
 
 ---
 
@@ -242,6 +248,35 @@ Compare differences between two snapshots.
    - Added items (green)
    - Removed items (red)
    - Changed items (yellow)
+
+---
+
+### 📜 Restore History
+
+Review previously executed restore actions and inspect outcomes.
+
+1. Menu → Tools → **Open Restore History**
+2. Select an entry to see details (timestamp, options, failures)
+3. Use it as a quick audit trail for restore troubleshooting
+
+---
+
+### 👋 Onboarding
+
+CtxSnap includes a built-in onboarding guide.
+
+1. It appears automatically on first launch
+2. You can reopen it from tray menu → **Onboarding**
+3. Covers snapshot creation, restore flow, tags, and settings
+
+---
+
+### 🌐 Language Support
+
+CtxSnap supports Korean and English.
+
+1. **Auto detect** from system locale on startup
+2. **Manual override** in Settings → General (restart required)
 
 ---
 
@@ -261,7 +296,7 @@ Backup your settings and snapshot data.
 1. Settings → Backup tab
 2. Click **Import Backup**
 3. Select backup file
-4. Restore complete!
+4. Choose `Apply now` for immediate apply, or `Keep in dialog` to apply on Save.
 
 ---
 
@@ -428,8 +463,8 @@ python -m PyInstaller ctxsnap_win.spec
 
 **Solution:**
 1. Settings → Backup tab
-2. Click **Reset Data**
-3. Or delete the `%APPDATA%\ctxsnap` folder
+2. **Restore Defaults** resets settings only.
+3. To remove everything including snapshots, delete `%APPDATA%\ctxsnap` manually.
 
 ---
 

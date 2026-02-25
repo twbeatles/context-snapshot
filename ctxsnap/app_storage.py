@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +29,10 @@ class Snapshot:
     recent_files: List[str]
     processes: List[Dict[str, Any]]
     running_apps: List[Dict[str, Any]]
+    source: str = ""
+    trigger: str = ""
+    git_state: Dict[str, str] = field(default_factory=dict)
+    auto_fingerprint: str = ""
 
 
 def app_dir() -> Path:
@@ -79,7 +83,7 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
                         "open_folder": True,
                         "open_terminal": True,
                         "open_vscode": True,
-                        "open_running_apps": True,
+                        "open_running_apps": False,
                         "show_post_restore_checklist": True,
                     },
                 },
@@ -197,8 +201,23 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("recent_files_limit", 30)
     settings.setdefault("restore_preview_default", True)
     settings.setdefault("tags", DEFAULT_TAGS)
-    settings.setdefault("hotkey", {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"})
-    settings.setdefault("capture", {"recent_files": True, "processes": True, "running_apps": True})
+    hotkey = settings.setdefault("hotkey", {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"})
+    if not isinstance(hotkey, dict):
+        hotkey = {}
+        settings["hotkey"] = hotkey
+    hotkey.setdefault("enabled", True)
+    hotkey.setdefault("ctrl", True)
+    hotkey.setdefault("alt", True)
+    hotkey.setdefault("shift", False)
+    hotkey.setdefault("vk", "S")
+
+    capture = settings.setdefault("capture", {"recent_files": True, "processes": True, "running_apps": True})
+    if not isinstance(capture, dict):
+        capture = {}
+        settings["capture"] = capture
+    capture.setdefault("recent_files", True)
+    capture.setdefault("processes", True)
+    capture.setdefault("running_apps", True)
     settings.setdefault("recent_files_exclude", [".git", "node_modules", "venv", "dist", "build"])
     settings.setdefault("recent_files_scan_limit", 20000)
     settings.setdefault("recent_files_scan_seconds", 2.0)
@@ -216,16 +235,24 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("capture_todos", True)
     settings.setdefault("auto_snapshot_minutes", 0)
     settings.setdefault("auto_snapshot_on_git_change", False)
-    settings.setdefault(
+    restore = settings.setdefault(
         "restore",
         {
             "open_folder": True,
             "open_terminal": True,
             "open_vscode": True,
-            "open_running_apps": True,
+            "open_running_apps": False,
             "show_post_restore_checklist": True,
         },
     )
+    if not isinstance(restore, dict):
+        restore = {}
+        settings["restore"] = restore
+    restore.setdefault("open_folder", True)
+    restore.setdefault("open_terminal", True)
+    restore.setdefault("open_vscode", True)
+    restore.setdefault("open_running_apps", False)
+    restore.setdefault("show_post_restore_checklist", True)
     # UX
     settings.setdefault("onboarding_shown", False)
     return settings
@@ -315,6 +342,13 @@ def migrate_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
     snap.setdefault("pinned", False)
     snap.setdefault("archived", False)
     snap.setdefault("running_apps", [])
+    snap.setdefault("source", "")
+    snap.setdefault("trigger", "")
+    snap.setdefault("auto_fingerprint", "")
+    if not isinstance(snap.get("git_state"), dict):
+        snap["git_state"] = {}
+    else:
+        snap.setdefault("git_state", {})
     return snap
 
 

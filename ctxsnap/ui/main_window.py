@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import logging
 from dataclasses import asdict
@@ -85,7 +87,7 @@ class MainWindow(QtWidgets.QMainWindow):
         a_open_folder = QtGui.QAction(tr("Open App Folder"), self)
         a_open_folder.triggered.connect(self.open_app_folder)
         a_quit = QtGui.QAction(tr("Quit"), self)
-        a_quit.triggered.connect(QtWidgets.QApplication.quit)
+        a_quit.triggered.connect(self.request_quit)
         for a in [a_new, a_quick, None, a_restore, a_restore_last, None, a_open_folder, None, a_quit]:
             if a is None:
                 m_file.addSeparator()
@@ -134,6 +136,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def open_app_folder(self) -> None:
         open_folder(app_dir())
 
+    def request_quit(self) -> None:
+        self._quit_requested = True
+        self.close()
+        QtWidgets.QApplication.quit()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CtxSnap")
@@ -142,7 +149,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.snaps_dir, self.index_path, self.settings_path = ensure_storage()
         self.index = load_json(self.index_path)
         self.settings = migrate_settings(load_json(self.settings_path))
-        save_json(self.settings_path, self.settings)
+        if not save_json(self.settings_path, self.settings):
+            LOGGER.warning("Failed to persist migrated settings at startup.")
 
         # Menus early (uses settings)
         self._build_menus()
@@ -162,8 +170,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if "vscode_workspace" not in it:
                 it["vscode_workspace"] = ""
                 changed = True
+            if "source" not in it:
+                it["source"] = ""
+                changed = True
+            if "trigger" not in it:
+                it["trigger"] = ""
+                changed = True
+            if "auto_fingerprint" not in it:
+                it["auto_fingerprint"] = ""
+                changed = True
+            if not isinstance(it.get("git_state"), dict):
+                it["git_state"] = {}
+                changed = True
         if changed:
-            save_json(self.index_path, self.index)
+            if not save_json(self.index_path, self.index):
+                LOGGER.warning("Failed to persist migrated index at startup.")
 
         self._apply_archive_policy()
 
@@ -389,9 +410,15 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Flag for clean shutdown
         self._is_closing = False
+        self._quit_requested = False
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        """Clean up resources when closing the window."""
+        """Minimize to tray by default; only quit on explicit request."""
+        if not self._quit_requested:
+            self.hide()
+            event.ignore()
+            return
+
         self._is_closing = True
         
         # Stop all timers
@@ -411,7 +438,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 LOGGER.exception("Error stopping worker thread %s: %s", sid, e)
         self._recent_workers.clear()
         
-        # Accept the close event (minimize to tray handled elsewhere if needed)
+        # Explicit quit path
         event.accept()
 
     def _setup_shortcuts(self) -> None:
@@ -462,7 +489,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _auto_snapshot_prompt(self) -> None:
         if int(self.settings.get("auto_snapshot_minutes", 0)) <= 0:
             return
-        self.quick_snapshot()
+        self._run_auto_snapshot("timer")
 
     def _update_auto_snapshot_timer(self) -> None:
         minutes = int(self.settings.get("auto_snapshot_minutes", 0))
@@ -496,7 +523,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         bkp = self._auto_backup_current()
         self.settings["auto_backup_last"] = now_iso()
-        save_json(self.settings_path, self.settings)
+        if not save_json(self.settings_path, self.settings):
+            LOGGER.warning("Failed to persist auto backup timestamp.")
         self.statusBar().showMessage(f"Auto backup created: {bkp.name}", 3500)
 
         # Cleanup old backups (keep last 5)
@@ -536,10 +564,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 snap = self.load_snapshot(sid)
                 if snap:
                     snap["archived"] = True
-                    save_snapshot_file(self.snap_path(sid), snap)
+                    if not save_snapshot_file(self.snap_path(sid), snap):
+                        LOGGER.warning("Failed to persist archived snapshot: %s", sid)
             updated = True
         if updated:
-            save_json(self.index_path, self.index)
+            if not save_json(self.index_path, self.index):
+                LOGGER.warning("Failed to persist archive policy updates.")
 
     def _check_git_change(self) -> None:
         if not bool(self.settings.get("auto_snapshot_on_git_change", False)):
@@ -549,8 +579,67 @@ class MainWindow(QtWidgets.QMainWindow):
         if not state:
             return
         if self._last_git_state and self._last_git_state != state:
-            self.quick_snapshot()
+            self._run_auto_snapshot("git_change")
         self._last_git_state = state
+
+    def _run_auto_snapshot(self, trigger: str) -> None:
+        source = "auto_timer" if trigger == "timer" else "auto_git"
+        root_raw = str(self.settings.get("default_root", "")).strip()
+        if not root_raw:
+            self.statusBar().showMessage("Auto snapshot skipped: default root is empty.", 3000)
+            LOGGER.warning("Auto snapshot skipped: default_root is empty.")
+            return
+
+        root_path = Path(root_raw).expanduser()
+        if not root_path.exists() or not root_path.is_dir():
+            self.statusBar().showMessage("Auto snapshot skipped: default root is invalid.", 3000)
+            LOGGER.warning("Auto snapshot skipped: invalid root=%s", root_path)
+            return
+        root_path = root_path.resolve()
+
+        seed = self._auto_seed_snapshot(root_path)
+        seed_workspace = str(seed.get("vscode_workspace", "")).strip() if seed else ""
+        seed_note = str(seed.get("note", "")).strip() if seed else ""
+        seed_todos = self._normalized_todos(seed.get("todos", ["", "", ""]) if seed else ["", "", ""])
+        seed_tags = self._normalized_tags(seed.get("tags", []) if seed else [])
+
+        if not seed_workspace:
+            workspaces = list(root_path.glob("*.code-workspace"))
+            if len(workspaces) == 1:
+                seed_workspace = str(workspaces[0].resolve())
+
+        capture_note = bool(self.settings.get("capture_note", True))
+        capture_todos = bool(self.settings.get("capture_todos", True))
+        note = seed_note if capture_note else ""
+        todos = seed_todos if capture_todos else ["", "", ""]
+
+        git_state_data = self._auto_git_state(root_path)
+        auto_fp = self._auto_fingerprint(
+            root=str(root_path),
+            workspace=seed_workspace,
+            note=note,
+            todos=todos,
+            tags=seed_tags,
+            git_state_data=git_state_data,
+        )
+        if self._is_duplicate_auto_snapshot(root_path, auto_fp):
+            self.statusBar().showMessage("Auto snapshot skipped: no changes detected.", 2500)
+            return
+
+        self._create_snapshot(
+            str(root_path),
+            self._auto_title(root_path),
+            seed_workspace,
+            note,
+            todos,
+            seed_tags,
+            source=source,
+            trigger=trigger,
+            git_state_data=git_state_data,
+            auto_fingerprint=auto_fp,
+            check_duplicate=False,
+            status_prefix="Auto snapshot saved",
+        )
 
     def _start_recent_files_scan(self, sid: str, root: Path) -> None:
         if sid in self._recent_workers:
@@ -584,18 +673,29 @@ class MainWindow(QtWidgets.QMainWindow):
         snap = self.load_snapshot(sid)
         if not snap:
             return
-        snap["recent_files"] = files
+        prev_snap = copy.deepcopy(snap)
+        prev_index = copy.deepcopy(self.index)
         snap_path = self.snap_path(sid)
-        save_snapshot_file(snap_path, snap)
-        snap_mtime = snapshot_mtime(snap_path)
-        for it in self.index.get("snapshots", []):
-            if it.get("id") == sid:
-                it["search_blob"] = build_search_blob(snap)
-                it["search_blob_mtime"] = snap_mtime
-                break
-        save_json(self.index_path, self.index)
-        self.refresh_list(reset_page=False)
-        self.statusBar().showMessage(tr("Recent files updated in background."), 2500)
+        try:
+            snap["recent_files"] = files
+            self._save_snapshot_or_raise(snap_path, snap, f"snapshot recent files {sid}")
+            snap_mtime = snapshot_mtime(snap_path)
+            for it in self.index.get("snapshots", []):
+                if it.get("id") == sid:
+                    it.update(self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime))
+                    break
+            self._save_json_or_raise(self.index_path, self.index, "index")
+            self.refresh_list(reset_page=False)
+            self.statusBar().showMessage(tr("Recent files updated in background."), 2500)
+        except Exception as exc:
+            log_exc(f"recent files update ({sid})", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            self.index = prev_index
+            try:
+                self._save_snapshot_or_raise(snap_path, prev_snap, f"snapshot recent files rollback {sid}")
+            except Exception as rollback_exc:
+                log_exc("rollback recent files snapshot file", rollback_exc)
+            if not save_json(self.index_path, self.index):
+                LOGGER.error("Failed to rollback index after recent files update error.")
 
     def _on_recent_files_failed(self, sid: str, error: str) -> None:
         log_exc(f"recent files background scan ({sid})", Exception(error))
@@ -719,7 +819,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
             view_items.append(it)
         if index_changed:
-            save_json(self.index_path, self.index)
+            if not save_json(self.index_path, self.index):
+                LOGGER.warning("Failed to persist search blob cache updates.")
         page_size = max(1, int(self.settings.get("list_page_size", 200)))
         total = len(view_items)
         self._total_pages = max(1, (total + page_size - 1) // page_size)
@@ -750,6 +851,113 @@ class MainWindow(QtWidgets.QMainWindow):
     def snap_path(self, sid: str) -> Path:
         return self.snaps_dir / f"{sid}.json"
 
+    def _save_json_or_raise(self, path: Path, data: Dict[str, Any], label: str) -> None:
+        if not save_json(path, data):
+            raise RuntimeError(f"Failed to save {label}: {path}")
+
+    def _save_snapshot_or_raise(self, path: Path, snap: Dict[str, Any], label: str) -> None:
+        if not save_snapshot_file(path, snap):
+            raise RuntimeError(f"Failed to save {label}: {path}")
+
+    @staticmethod
+    def _index_entry_from_snapshot_data(snap: Dict[str, Any], *, snap_mtime: float = 0.0) -> Dict[str, Any]:
+        return {
+            "id": snap.get("id", ""),
+            "title": snap.get("title", ""),
+            "created_at": snap.get("created_at", ""),
+            "root": snap.get("root", ""),
+            "vscode_workspace": snap.get("vscode_workspace", ""),
+            "tags": snap.get("tags", []),
+            "pinned": bool(snap.get("pinned", False)),
+            "archived": bool(snap.get("archived", False)),
+            "search_blob": build_search_blob(snap),
+            "search_blob_mtime": snap_mtime,
+            "source": snap.get("source", ""),
+            "trigger": snap.get("trigger", ""),
+            "git_state": snap.get("git_state", {}),
+            "auto_fingerprint": snap.get("auto_fingerprint", ""),
+        }
+
+    @staticmethod
+    def _normalized_todos(todos: List[str]) -> List[str]:
+        out = [str(t or "").strip() for t in todos[:3]]
+        while len(out) < 3:
+            out.append("")
+        return out
+
+    @staticmethod
+    def _normalized_tags(tags: List[str]) -> List[str]:
+        return [str(t).strip() for t in tags if str(t).strip()]
+
+    @staticmethod
+    def _auto_title(root_path: Path) -> str:
+        return f"Auto: {root_path.name or str(root_path)} @ {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+    @staticmethod
+    def _safe_path_equals(path_a: str, path_b: Path) -> bool:
+        try:
+            return Path(path_a).resolve() == path_b.resolve()
+        except Exception:
+            return False
+
+    def _auto_seed_snapshot(self, root_path: Path) -> Optional[Dict[str, Any]]:
+        # 1) latest snapshot for the same root, 2) latest snapshot globally
+        for it in self.index.get("snapshots", []):
+            if not self._safe_path_equals(str(it.get("root", "")), root_path):
+                continue
+            sid = str(it.get("id") or "").strip()
+            if not sid:
+                continue
+            snap = self.load_snapshot(sid)
+            if snap:
+                return snap
+        for it in self.index.get("snapshots", []):
+            sid = str(it.get("id") or "").strip()
+            if not sid:
+                continue
+            snap = self.load_snapshot(sid)
+            if snap:
+                return snap
+        return None
+
+    def _auto_git_state(self, root_path: Path) -> Dict[str, str]:
+        state = git_state(root_path)
+        if not state:
+            return {}
+        return {"branch": state[0], "sha": state[1]}
+
+    def _auto_fingerprint(
+        self,
+        *,
+        root: str,
+        workspace: str,
+        note: str,
+        todos: List[str],
+        tags: List[str],
+        git_state_data: Dict[str, str],
+    ) -> str:
+        payload = {
+            "root": root,
+            "workspace": workspace,
+            "note": note,
+            "todos": self._normalized_todos(todos),
+            "tags": self._normalized_tags(tags),
+            "git_state": git_state_data,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _is_duplicate_auto_snapshot(self, root_path: Path, auto_fingerprint: str) -> bool:
+        root = str(root_path.resolve())
+        for it in self.index.get("snapshots", []):
+            if str(it.get("root", "")) != root:
+                continue
+            source = str(it.get("source", ""))
+            if source not in {"auto_timer", "auto_git"}:
+                continue
+            return str(it.get("auto_fingerprint", "")) == auto_fingerprint
+        return False
+
     def load_snapshot(self, sid: str) -> Optional[Dict[str, Any]]:
         p = self.snap_path(sid)
         if not p.exists():
@@ -760,25 +968,40 @@ class MainWindow(QtWidgets.QMainWindow):
             log_exc(f"load snapshot {sid}", e)
             return None
 
-    def save_snapshot(self, snap: Snapshot) -> None:
+    def save_snapshot(self, snap: Snapshot) -> bool:
         snap_path = self.snap_path(snap.id)
-        save_snapshot_file(snap_path, asdict(snap))
-        snap_mtime = snapshot_mtime(snap_path)
-        self.index["snapshots"].insert(0, {
-            "id": snap.id,
-            "title": snap.title,
-            "created_at": snap.created_at,
-            "root": snap.root,
-            "vscode_workspace": snap.vscode_workspace,
-            "tags": snap.tags,
-            "pinned": snap.pinned,
-            "archived": snap.archived,
-            "search_blob": build_search_blob(asdict(snap)),
-            "search_blob_mtime": snap_mtime,
-        })
-        save_json(self.index_path, self.index)
-        self.settings["default_root"] = snap.root
-        save_json(self.settings_path, self.settings)
+        prev_index = copy.deepcopy(self.index)
+        prev_settings = copy.deepcopy(self.settings)
+        prev_snapshot_raw = snap_path.read_text(encoding="utf-8") if snap_path.exists() else None
+
+        try:
+            snap_data = asdict(snap)
+            self._save_snapshot_or_raise(snap_path, snap_data, f"snapshot {snap.id}")
+            snap_mtime = snapshot_mtime(snap_path)
+            self.index["snapshots"].insert(
+                0,
+                self._index_entry_from_snapshot_data(snap_data, snap_mtime=snap_mtime),
+            )
+            self._save_json_or_raise(self.index_path, self.index, "index")
+            self.settings["default_root"] = snap.root
+            self._save_json_or_raise(self.settings_path, self.settings, "settings")
+            return True
+        except Exception as exc:
+            log_exc("save snapshot", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            self.index = prev_index
+            self.settings = prev_settings
+            try:
+                if prev_snapshot_raw is None:
+                    snap_path.unlink(missing_ok=True)
+                else:
+                    snap_path.write_text(prev_snapshot_raw, encoding="utf-8")
+            except Exception as rollback_exc:
+                log_exc("rollback snapshot file", rollback_exc)
+            if not save_json(self.index_path, self.index):
+                LOGGER.error("Failed to rollback index file after snapshot save error.")
+            if not save_json(self.settings_path, self.settings):
+                LOGGER.error("Failed to rollback settings file after snapshot save error.")
+            return False
 
     # ----- selection rendering -----
     def on_select(self, current: QtCore.QModelIndex, previous: QtCore.QModelIndex) -> None:
@@ -877,36 +1100,50 @@ class MainWindow(QtWidgets.QMainWindow):
         snap = self.load_snapshot(sid)
         if not snap:
             return
-        
-        # Update snapshot fields
-        snap["title"] = title
-        snap["root"] = root
-        snap["vscode_workspace"] = workspace
-        snap["note"] = note
-        snap["todos"] = todos[:3]
-        snap["tags"] = tags
-        
-        # Write updated snapshot file
+
+        prev_snap = copy.deepcopy(snap)
+        prev_index = copy.deepcopy(self.index)
+        prev_settings = copy.deepcopy(self.settings)
         snap_path = self.snap_path(sid)
-        save_snapshot_file(snap_path, snap)
-        snap_mtime = snapshot_mtime(snap_path)
-        
-        # Update index entry
-        for it in self.index.get("snapshots", []):
-            if it.get("id") == sid:
-                it["title"] = title
-                it["root"] = root
-                it["vscode_workspace"] = workspace
-                it["tags"] = tags
-                it["search_blob"] = build_search_blob(snap)
-                it["search_blob_mtime"] = snap_mtime
-                break
-        save_json(self.index_path, self.index)
-        
-        # Update default_root setting
-        self.settings["default_root"] = root
-        save_json(self.settings_path, self.settings)
-        
+
+        try:
+            # Update snapshot fields
+            snap["title"] = title
+            snap["root"] = root
+            snap["vscode_workspace"] = workspace
+            snap["note"] = note
+            snap["todos"] = self._normalized_todos(todos)
+            snap["tags"] = self._normalized_tags(tags)
+
+            # Write updated snapshot file
+            self._save_snapshot_or_raise(snap_path, snap, f"snapshot {sid}")
+            snap_mtime = snapshot_mtime(snap_path)
+
+            # Update index entry
+            for it in self.index.get("snapshots", []):
+                if it.get("id") == sid:
+                    it.update(self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime))
+                    break
+            self._save_json_or_raise(self.index_path, self.index, "index")
+
+            # Update default_root setting
+            self.settings["default_root"] = root
+            self._save_json_or_raise(self.settings_path, self.settings, "settings")
+        except Exception as exc:
+            log_exc("update snapshot", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            self.index = prev_index
+            self.settings = prev_settings
+            try:
+                self._save_snapshot_or_raise(snap_path, prev_snap, f"snapshot rollback {sid}")
+            except Exception as rollback_exc:
+                log_exc("rollback snapshot update file", rollback_exc)
+            if not save_json(self.index_path, self.index):
+                LOGGER.error("Failed to rollback index file after update error.")
+            if not save_json(self.settings_path, self.settings):
+                LOGGER.error("Failed to rollback settings file after update error.")
+            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to update snapshot: {sid}")
+            return
+
         # Refresh UI
         self.refresh_list(reset_page=False)
         self.on_select(self.listw.currentIndex(), QtCore.QModelIndex())
@@ -939,13 +1176,30 @@ class MainWindow(QtWidgets.QMainWindow):
         v = dlg.values()
         self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
 
-    def _create_snapshot(self, root: str, title: str, workspace: str, note: str, todos: List[str], tags: List[str]) -> None:
+    def _create_snapshot(
+        self,
+        root: str,
+        title: str,
+        workspace: str,
+        note: str,
+        todos: List[str],
+        tags: List[str],
+        *,
+        source: str = "",
+        trigger: str = "",
+        git_state_data: Optional[Dict[str, str]] = None,
+        auto_fingerprint: str = "",
+        check_duplicate: bool = True,
+        status_prefix: str = "Saved snapshot",
+    ) -> None:
         root_path = Path(root).resolve()
 
         # Check for duplication (same root and title in active snapshots)
-        for it in self.index.get("snapshots", []):
-            if not bool(it.get("archived", False)):
-                if it.get("title") == title and Path(it.get("root", "")).resolve() == root_path:
+        if check_duplicate:
+            for it in self.index.get("snapshots", []):
+                if bool(it.get("archived", False)):
+                    continue
+                if it.get("title") == title and self._safe_path_equals(str(it.get("root", "")), root_path):
                     r = QtWidgets.QMessageBox.warning(
                         self,
                         tr("Duplicate Snapshot"),
@@ -981,7 +1235,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
             )
         snapshot_note = note if capture_note else ""
-        snapshot_todos = todos[:3] if capture_todos else ["", "", ""]
+        snapshot_todos = self._normalized_todos(todos) if capture_todos else ["", "", ""]
         process_keywords = self.settings.get("process_keywords", [])
         snap = Snapshot(
             id=sid,
@@ -991,20 +1245,26 @@ class MainWindow(QtWidgets.QMainWindow):
             vscode_workspace=ws,
             note=snapshot_note,
             todos=snapshot_todos,
-            tags=tags,
+            tags=self._normalized_tags(tags),
             pinned=False,
             archived=False,
             recent_files=recent_files,
             processes=list_processes_filtered(process_keywords) if capture_processes else [],
             running_apps=list_running_apps() if capture_running_apps else [],
+            source=source,
+            trigger=trigger,
+            git_state=git_state_data or {},
+            auto_fingerprint=auto_fingerprint,
         )
-        self.save_snapshot(snap)
+        if not self.save_snapshot(snap):
+            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to save snapshot: {sid}")
+            return
         if capture_recent and background_recent:
             self._start_recent_files_scan(sid, root_path)
         self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))
-        self.statusBar().showMessage(f"Saved snapshot: {sid}", 3500)
+        self.statusBar().showMessage(f"{status_prefix}: {sid}", 3500)
 
     def _update_snapshot_meta(
         self,
@@ -1018,26 +1278,35 @@ class MainWindow(QtWidgets.QMainWindow):
         snap = self.load_snapshot(sid)
         if not snap:
             return
-        if pinned is not None:
-            snap["pinned"] = bool(pinned)
-        if archived is not None:
-            snap["archived"] = bool(archived)
-        if tags is not None:
-            snap["tags"] = tags
-        # write snapshot file
-        save_snapshot_file(self.snap_path(sid), snap)
+        prev_snap = copy.deepcopy(snap)
+        prev_index = copy.deepcopy(self.index)
+        snap_path = self.snap_path(sid)
+        try:
+            if pinned is not None:
+                snap["pinned"] = bool(pinned)
+            if archived is not None:
+                snap["archived"] = bool(archived)
+            if tags is not None:
+                snap["tags"] = self._normalized_tags(tags)
+            self._save_snapshot_or_raise(snap_path, snap, f"snapshot meta {sid}")
+            snap_mtime = snapshot_mtime(snap_path)
 
-        # update index
-        for it in self.index.get("snapshots", []):
-            if it.get("id") == sid:
-                if pinned is not None:
-                    it["pinned"] = bool(pinned)
-                if archived is not None:
-                    it["archived"] = bool(archived)
-                if tags is not None:
-                    it["tags"] = tags
-                break
-        save_json(self.index_path, self.index)
+            # update index
+            for it in self.index.get("snapshots", []):
+                if it.get("id") == sid:
+                    it.update(self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime))
+                    break
+            self._save_json_or_raise(self.index_path, self.index, "index")
+        except Exception as exc:
+            log_exc("update snapshot meta", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            self.index = prev_index
+            try:
+                self._save_snapshot_or_raise(snap_path, prev_snap, f"snapshot meta rollback {sid}")
+            except Exception as rollback_exc:
+                log_exc("rollback snapshot meta file", rollback_exc)
+            if not save_json(self.index_path, self.index):
+                LOGGER.error("Failed to rollback index file after meta update error.")
+            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to update snapshot metadata: {sid}")
 
     def toggle_pin(self) -> None:
         sid = self.selected_id()
@@ -1063,16 +1332,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_pagination_and_refresh()
         self.statusBar().showMessage("Archived." if new_state else "Unarchived.", 2000)
 
-    def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> None:
+    def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> bool:
         """Apply settings immediately (UI + hotkey)."""
         vals = migrate_settings(vals)
         vals.setdefault("default_root", self.settings.get("default_root", str(Path.home())))
         self.settings = vals
         if save:
-            try:
-                save_json(self.settings_path, self.settings)
-            except Exception as e:
-                log_exc("save settings", e)
+            if not save_json(self.settings_path, self.settings):
+                log_exc("save settings", RuntimeError("save_json returned False"))
+                QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to save settings.")
+                return False
 
         # Refresh tag filter
         self._build_tag_menu()
@@ -1088,6 +1357,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_auto_snapshot_timer()
         self._update_backup_timer()
         self._apply_archive_policy()
+        return True
 
     def _auto_backup_current(self) -> Path:
         backups = app_dir() / "backups"
@@ -1099,102 +1369,138 @@ class MainWindow(QtWidgets.QMainWindow):
             log_exc("auto backup", e)
         return bkp
 
-    def apply_imported_backup(self, payload: Dict[str, Any]) -> None:
+    def apply_imported_backup(self, payload: Dict[str, Any]) -> bool:
         """Apply imported backup: optionally merge/overwrite snapshots/index, then apply settings."""
-        # Apply data first (may be destructive)
         data = payload.get("data")
-        if data:
-            bkp = self._auto_backup_current()
-            self.statusBar().showMessage(f"Safety backup created: {bkp.name}", 3500)
+        safety_backup: Optional[Path] = None
+        prev_index = copy.deepcopy(self.index)
+        prev_settings = copy.deepcopy(self.settings)
+        prev_snapshot_files: Dict[str, str] = {}
 
-            # Strategy prompt
-            msg = QtWidgets.QMessageBox(self)
-            msg.setWindowTitle("Import snapshots")
-            msg.setText("백업에 스냅샷이 포함되어 있습니다. 적용 방식을 선택하세요.")
-            msg.setInformativeText("Merge: 기존은 유지하고 새 항목만 추가\nOverwrite: 같은 ID는 덮어쓰기\nReplace all: 현재 스냅샷을 모두 삭제 후 백업으로 교체")
-            btn_merge = msg.addButton("Merge", QtWidgets.QMessageBox.AcceptRole)
-            btn_overwrite = msg.addButton("Overwrite", QtWidgets.QMessageBox.DestructiveRole)
-            btn_replace = msg.addButton("Replace all", QtWidgets.QMessageBox.DestructiveRole)
-            btn_cancel = msg.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
-            msg.exec()
-            clicked = msg.clickedButton()
-            if clicked == btn_cancel:
-                return
-            strategy = "merge" if clicked == btn_merge else ("overwrite" if clicked == btn_overwrite else "replace")
+        try:
+            # Apply data first (may be destructive)
+            if data:
+                safety_backup = self._auto_backup_current()
+                self.statusBar().showMessage(f"Safety backup created: {safety_backup.name}", 3500)
 
-            imported_snaps = data.get("snapshots") or []
-            imported_index = data.get("index") if isinstance(data.get("index"), dict) else None
+                msg = QtWidgets.QMessageBox(self)
+                msg.setWindowTitle("Import snapshots")
+                msg.setText("백업에 스냅샷이 포함되어 있습니다. 적용 방식을 선택하세요.")
+                msg.setInformativeText("Merge: 기존은 유지하고 새 항목만 추가\nOverwrite: 같은 ID는 덮어쓰기\nReplace all: 현재 스냅샷을 모두 삭제 후 백업으로 교체")
+                btn_merge = msg.addButton("Merge", QtWidgets.QMessageBox.AcceptRole)
+                btn_overwrite = msg.addButton("Overwrite", QtWidgets.QMessageBox.DestructiveRole)
+                btn_replace = msg.addButton("Replace all", QtWidgets.QMessageBox.DestructiveRole)
+                btn_cancel = msg.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
+                msg.exec()
+                clicked = msg.clickedButton()
+                if clicked == btn_cancel:
+                    return False
+                strategy = "merge" if clicked == btn_merge else ("overwrite" if clicked == btn_overwrite else "replace")
 
-            if strategy == "replace":
-                try:
+                imported_snaps = data.get("snapshots") or []
+                imported_index = data.get("index") if isinstance(data.get("index"), dict) else None
+                if not isinstance(imported_snaps, list):
+                    raise ValueError("Invalid backup: snapshots field must be a list.")
+
+                for f in self.snaps_dir.glob("*.json"):
+                    prev_snapshot_files[f.name] = f.read_text(encoding="utf-8")
+
+                if strategy == "replace":
                     for f in self.snaps_dir.glob("*.json"):
                         f.unlink(missing_ok=True)
-                except Exception as e:
-                    log_exc("wipe snapshots", e)
-                self.index = {"snapshots": []}
+                    self.index = {"snapshots": []}
 
-            existing_ids = {it.get("id") for it in self.index.get("snapshots", []) if it.get("id")}
+                existing_ids = {str(it.get("id")) for it in self.index.get("snapshots", []) if it.get("id")}
 
-            def index_entry_from_snap(snap: Dict[str, Any]) -> Dict[str, Any]:
-                return {
-                    "id": snap.get("id"),
-                    "title": snap.get("title", ""),
-                    "created_at": snap.get("created_at", ""),
-                    "root": snap.get("root", ""),
-                    "vscode_workspace": snap.get("vscode_workspace", ""),
-                    "pinned": bool(snap.get("pinned", False)),
-                    "archived": bool(snap.get("archived", False)),
-                    "tags": snap.get("tags", []),
-                }
+                for raw_snap in imported_snaps:
+                    if not isinstance(raw_snap, dict):
+                        continue
+                    snap = migrate_snapshot(dict(raw_snap))
+                    sid = str(snap.get("id") or "").strip()
+                    if not sid:
+                        continue
+                    if strategy == "merge" and sid in existing_ids:
+                        continue
 
-            for snap in imported_snaps:
-                sid = snap.get("id")
-                if not sid:
-                    continue
-                if strategy == "merge" and sid in existing_ids:
-                    continue
-                try:
-                    save_snapshot_file(self.snap_path(sid), migrate_snapshot(snap))
-                except Exception as e:
-                    log_exc("write imported snapshot", e)
-                    continue
-                if sid not in existing_ids:
-                    self.index.setdefault("snapshots", []).append(index_entry_from_snap(snap))
-                    existing_ids.add(sid)
-                elif strategy == "overwrite":
-                    # update index entry meta
-                    for it in self.index.get("snapshots", []):
-                        if it.get("id") == sid:
-                            it.update(index_entry_from_snap(snap))
-                            break
+                    snap_path = self.snap_path(sid)
+                    self._save_snapshot_or_raise(snap_path, snap, f"imported snapshot {sid}")
+                    snap_mtime = snapshot_mtime(snap_path)
+                    entry = self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime)
+                    if sid not in existing_ids:
+                        self.index.setdefault("snapshots", []).append(entry)
+                        existing_ids.add(sid)
+                    elif strategy == "overwrite":
+                        for it in self.index.get("snapshots", []):
+                            if it.get("id") == sid:
+                                it.update(entry)
+                                break
 
-            # If imported index exists and overwrite/replace: prefer it
-            if imported_index and strategy in ("overwrite", "replace"):
-                self.index = imported_index
+                if imported_index and strategy in ("overwrite", "replace"):
+                    migrated_index = {"snapshots": []}
+                    for raw_item in imported_index.get("snapshots", []):
+                        if not isinstance(raw_item, dict):
+                            continue
+                        item = dict(raw_item)
+                        item.setdefault("tags", [])
+                        item.setdefault("pinned", False)
+                        item.setdefault("archived", False)
+                        item.setdefault("vscode_workspace", "")
+                        item.setdefault("source", "")
+                        item.setdefault("trigger", "")
+                        item.setdefault("auto_fingerprint", "")
+                        if not isinstance(item.get("git_state"), dict):
+                            item["git_state"] = {}
+                        migrated_index["snapshots"].append(item)
+                    self.index = migrated_index
 
-            # Dedup index by id
-            seen = set()
-            dedup = []
-            for it in self.index.get("snapshots", []):
-                sid = it.get("id")
-                if not sid or sid in seen:
-                    continue
-                seen.add(sid)
-                dedup.append(it)
-            self.index["snapshots"] = dedup
+                # Dedup index by id
+                seen = set()
+                dedup = []
+                for it in self.index.get("snapshots", []):
+                    sid = str(it.get("id") or "")
+                    if not sid or sid in seen:
+                        continue
+                    seen.add(sid)
+                    dedup.append(it)
+                self.index["snapshots"] = dedup
+                self._save_json_or_raise(self.index_path, self.index, "index after import")
+                self._reset_pagination_and_refresh()
 
+            # Apply settings (always)
+            if not self.apply_settings(payload.get("settings", {}), save=True):
+                raise RuntimeError("Failed to apply imported settings.")
+            return True
+
+        except Exception as exc:
+            log_exc("apply imported backup", exc if isinstance(exc, Exception) else Exception(str(exc)))
+
+            # Rollback snapshots/index/settings on any failure
             try:
-                save_json(self.index_path, self.index)
-            except Exception as e:
-                log_exc("save index after import", e)
+                if data:
+                    for f in self.snaps_dir.glob("*.json"):
+                        f.unlink(missing_ok=True)
+                    for name, raw in prev_snapshot_files.items():
+                        (self.snaps_dir / name).write_text(raw, encoding="utf-8")
+            except Exception as rollback_exc:
+                log_exc("rollback imported snapshots", rollback_exc)
 
+            self.index = prev_index
+            self.settings = prev_settings
+            if not save_json(self.index_path, self.index):
+                LOGGER.error("Failed to rollback index after import failure.")
+            if not save_json(self.settings_path, self.settings):
+                LOGGER.error("Failed to rollback settings after import failure.")
             self._reset_pagination_and_refresh()
 
-        # Apply settings (always)
-        self.apply_settings(payload.get("settings", {}), save=True)
+            msg = "Import failed. Changes were rolled back."
+            if safety_backup:
+                msg += f"\nSafety backup: {safety_backup}"
+            QtWidgets.QMessageBox.warning(self, tr("Error"), msg)
+            return False
 
     def open_settings(self) -> None:
         dlg = SettingsDialog(self, self.settings, index_path=self.index_path, snaps_dir=self.snaps_dir)
+        dlg.settingsImported.connect(self.apply_imported_backup)
         if dlg.exec() != QtWidgets.QDialog.Accepted:
             return
 
@@ -1203,9 +1509,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # If user imported but did not apply, apply now on Save
         if payload and not dlg.import_apply_now():
-            self.apply_imported_backup(payload)
+            if not self.apply_imported_backup(payload):
+                return
         else:
-            self.apply_settings(vals, save=True)
+            if not self.apply_settings(vals, save=True):
+                return
 
         self.statusBar().showMessage("Settings applied.", 2500)
 
@@ -1243,8 +1551,10 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        save_snapshot_file(Path(path), snap)
-        self.statusBar().showMessage("Snapshot exported.", 2500)
+        if save_snapshot_file(Path(path), snap):
+            self.statusBar().showMessage("Snapshot exported.", 2500)
+        else:
+            QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to export snapshot.")
 
     def export_weekly_report(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -1324,7 +1634,7 @@ class MainWindow(QtWidgets.QMainWindow):
         open_folder_default = bool(restore_cfg.get("open_folder", True))
         open_terminal_default = bool(restore_cfg.get("open_terminal", True))
         open_vscode_default = bool(restore_cfg.get("open_vscode", True))
-        open_running_apps_default = bool(restore_cfg.get("open_running_apps", True))
+        open_running_apps_default = bool(restore_cfg.get("open_running_apps", False))
         show_checklist = bool(restore_cfg.get("show_post_restore_checklist", True))
         preview_default = bool(self.settings.get("restore_preview_default", True))
 
@@ -1389,6 +1699,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "open_running_apps": bool(ch.get("open_running_apps")),
             "running_apps_requested": len(requested_apps),
             "running_apps_failed": running_app_failures,
+            "running_apps_failed_count": len(running_app_failures),
             "root_missing": root_missing,
             "vscode_opened": vscode_opened,
         })
@@ -1433,7 +1744,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
-        save_json(self.index_path, self.index)
+        if not save_json(self.index_path, self.index):
+            QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to save index after delete.")
+            return
         self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:
             self.listw.setCurrentIndex(self.list_model.index(0, 0))

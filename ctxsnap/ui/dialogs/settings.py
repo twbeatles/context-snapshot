@@ -114,7 +114,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
-        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
 
         self.preview_default = QtWidgets.QCheckBox("👁 " + tr("Show restore preview by default"))
@@ -518,7 +518,7 @@ class SettingsDialog(QtWidgets.QDialog):
             payload = import_backup_from_file(Path(path))
             self._imported_payload = payload
             new_settings = payload.get("settings", {})
-            self.apply_settings_to_controls(new_settings)
+            self.apply_settings_to_controls(new_settings, reset_import_state=False)
 
             msg = QtWidgets.QMessageBox(self)
             msg.setWindowTitle(tr("Import Dialog Title"))
@@ -545,12 +545,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.apply_settings_to_controls(new_settings)
         self.b_msg.setText("✅ " + tr("Reset to defaults done"))
 
-    def apply_settings_to_controls(self, settings: Dict[str, Any]) -> None:
+    def apply_settings_to_controls(self, settings: Dict[str, Any], *, reset_import_state: bool = True) -> None:
         """Apply a settings dict to UI controls (does not save to disk here)."""
         settings = migrate_settings(settings)
         self._settings = settings
-        self._imported_payload = None
-        self._import_apply_now = False
+        if reset_import_state:
+            self._imported_payload = None
+            self._import_apply_now = False
 
         # Apply Language
         lang = settings.get("language", "auto")
@@ -574,7 +575,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
-        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", True)))
+        self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
         self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
         self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
 

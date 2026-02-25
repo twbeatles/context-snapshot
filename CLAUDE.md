@@ -58,6 +58,15 @@ context-snapshot-main/
     └── ctxsnap.log         # 로테이팅 로그 파일
 ```
 
+스냅샷 JSON의 주요 메타 필드:
+- `source`: 수동/자동 생성 소스 (`auto_timer`, `auto_git`, ...)
+- `trigger`: 자동 생성 트리거 (`timer`, `git_change`, ...)
+- `git_state`: 자동 스냅샷 시점 Git 상태 (`branch`, `sha`)
+- `auto_fingerprint`: 자동 스냅샷 dedup 해시
+
+복원 기록 JSON(`restore_history.json`) 추가 필드:
+- `running_apps_failed_count`: 앱 복원 실패 개수 (정수)
+
 ---
 
 ## 핵심 모듈 설명
@@ -120,11 +129,13 @@ context-snapshot-main/
 3. **태그/고정(Pin)**: 태그 필터링, 중요 스냅샷 고정
 4. **검색**: 제목/루트/태그/메모/TODO/프로세스 통합 검색
 5. **글로벌 핫키**: Ctrl+Alt+S (설정 가능)로 빠른 스냅샷
-6. **자동 스냅샷**: 주기적 또는 Git 변경 감지 기반
+6. **자동 스냅샷**: 주기적 또는 Git 변경 감지 기반 (확인 다이얼로그 없이 저장)
 7. **템플릿**: 자주 쓰는 TODO/태그/메모 템플릿
 8. **스냅샷 비교**: 두 스냅샷 차이 비교
 10. **복원 기록**: 최근 복원 내역 확인 및 재실행
 11. **온보딩 & 다국어**: 첫 사용자 가이드 및 한/영 지원
+12. **트레이 종료 정책**: 창 닫기(X)는 트레이 최소화, 실제 종료는 Quit
+13. **백업 가져오기 적용 방식**: `Apply now`는 즉시 적용, `Keep in dialog`는 저장 시 적용
 
 ---
 
@@ -180,14 +191,15 @@ python -m PyInstaller ctxsnap_win.spec
 | 키 | 설명 | 기본값 |
 |----|------|--------|
 | `default_root` | 기본 루트 폴더 | `%USERPROFILE%` |
-| `hotkey_enabled` | 글로벌 핫키 활성화 | `true` |
+| `hotkey.enabled` | 글로벌 핫키 활성화 | `true` |
 | `hotkey.ctrl/alt/shift/vk` | 핫키 조합 | `Ctrl+Alt+S` |
 | `recent_files_limit` | 최근 파일 수집 개수 | `30` |
-| `recent_files_exclude_dirs` | 제외 디렉토리 | `[".git", "node_modules"]` |
+| `recent_files_exclude` | 제외 디렉토리 | `[".git", "node_modules"]` |
 | `process_keywords` | 프로세스 필터 키워드 | `["code", "chrome", ...]` |
 | `auto_snapshot_minutes` | 자동 스냅샷 주기(분) | `0` (비활성) |
 | `auto_snapshot_on_git_change` | Git 변경 시 자동 스냅샷 | `false` |
 | `restore.open_folder/terminal/vscode` | 복원 동작 설정 | 각각 `true` |
+| `restore.open_running_apps` | 복원 시 앱 실행 | `false` |
 | `tags` | 사용자 정의 태그 목록 | `["업무", "개인", ...]` |
 
 ---
