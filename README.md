@@ -41,10 +41,14 @@
 | **Git 연동** | 브랜치 + 커밋 정보로 제목 자동 추천 |
 | **태그/고정** | 업무/개인 등 분류 및 중요 스냅샷 고정 |
 | **통합 검색** | 제목/메모/TODO/파일/프로세스까지 검색 |
+| **필드 검색** | `tag:`, `root:`, `todo:` 형태의 고급 쿼리(개발자 기능) |
 | **자동 스냅샷** | 주기적 또는 Git 변경 감지 시 자동 저장 |
 | **템플릿** | 자주 쓰는 설정 템플릿 저장 |
 | **스냅샷 비교** | 두 스냅샷의 차이점 비교 |
 | **백업/복원** | 설정 및 스냅샷 데이터 백업 |
+| **선택 암호화(DPAPI)** | 메모/TODO/프로세스/앱 정보를 항목별 암호화(기능 플래그) |
+| **로컬 동기화** | 플러그인 기반 Sync 엔진 + 로컬 provider + 충돌 큐 |
+| **복원 프로필** | 복원 옵션 조합을 프로필로 저장/적용(기능 플래그) |
 | **복원 기록** | 최근 복원한 스냅샷 이력 확인 및 재실행 |
 | **다국어 지원** | 한국어/영어 지원 (시스템 언어 자동 감지) |
 | **온보딩** | 첫 실행 시 기능 가이드 제공 |
@@ -55,21 +59,21 @@
 
 ### 방법 1: 설치 프로그램 사용 (권장)
 
-1. [Releases](https://github.com/your-repo/ctxsnap/releases)에서 `CtxSnap_Setup.exe` 다운로드
+1. [Releases](https://github.com/twbeatles/context-snapshot/releases)에서 `CtxSnap_Setup.exe` 다운로드
 2. 설치 프로그램 실행
 3. 설치 완료 후 시작 메뉴에서 **CtxSnap** 실행
 
 ### 방법 2: 포터블 실행
 
-1. [Releases](https://github.com/your-repo/ctxsnap/releases)에서 `CtxSnap.zip` 다운로드
+1. [Releases](https://github.com/twbeatles/context-snapshot/releases)에서 `CtxSnap.zip` 다운로드
 2. 압축 해제 후 `CtxSnap.exe` 실행
 
 ### 방법 3: 소스에서 실행
 
 ```bash
 # 저장소 클론
-git clone https://github.com/your-repo/ctxsnap.git
-cd ctxsnap
+git clone https://github.com/twbeatles/context-snapshot.git
+cd context-snapshot
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -198,6 +202,7 @@ python ctxsnap_win.py
 **검색 팁:**
 - 공백으로 여러 키워드 검색 (AND 조건)
 - 대소문자 구분 없음
+- 개발자 기능 활성 시 필드 검색 지원: `tag:업무 root:context-snapshot todo:배포`
 
 ---
 
@@ -333,6 +338,22 @@ CtxSnap은 시스템 트레이에 상주합니다.
 | 자동 스냅샷 주기 | 분 단위, 0=비활성 | `0` |
 | Git 변경 감지 | Git 상태 변경 시 자동 저장 | `false` |
 
+### Developer/Sync/Security/Search (General 탭 하위)
+
+| 설정 | 설명 | 기본값 |
+|------|------|--------|
+| Enable Sync Feature | 동기화 기능 활성화 | `false` |
+| Enable Security Feature | DPAPI 암호화 기능 활성화 | `false` |
+| Enable Advanced Search | 필드 검색 활성화 | `false` |
+| Enable Restore Profiles | 복원 프로필 기능 활성화 | `false` |
+| Sync Provider | 동기화 provider (`local`/`cloud_stub`) | `local` |
+| Local Sync Root | 로컬 동기화 대상 폴더 | `%APPDATA%\ctxsnap\sync_local` |
+| Sync Interval | 자동 동기화 간격(분), 0=비활성 | `0` |
+| Enable DPAPI | Windows DPAPI 사용 | `false` |
+| Encrypt Note/TODO/Processes/Running Apps | 민감 필드 선택 암호화 | `true` |
+| Enable Field Query | `tag:`, `root:`, `todo:` 필드 쿼리 허용 | `true` |
+| Saved Queries | 검색 프리셋 목록 | `[]` |
+
 ### Restore 탭
 
 | 설정 | 설명 | 기본값 |
@@ -366,6 +387,8 @@ CtxSnap은 시스템 트레이에 상주합니다.
 ├── index.json              # 스냅샷 인덱스 (검색용 캐시)
 ├── settings.json           # 앱 설정
 ├── restore_history.json    # 복원 기록
+├── sync_conflicts.json     # 동기화 충돌 큐
+├── sync_state.json         # 동기화 상태(커서/마지막 동기화)
 └── logs/
     └── ctxsnap.log         # 로그 파일 (로테이팅)
 ```
@@ -380,8 +403,8 @@ CtxSnap은 시스템 트레이에 상주합니다.
 
 ```bash
 # 저장소 클론
-git clone https://github.com/your-repo/ctxsnap.git
-cd ctxsnap
+git clone https://github.com/twbeatles/context-snapshot.git
+cd context-snapshot
 
 # 가상 환경 생성 (권장)
 python -m venv venv
@@ -389,9 +412,16 @@ venv\Scripts\activate
 
 # 의존성 설치
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 개발 모드 실행
 python ctxsnap_win.py
+```
+
+### 테스트
+
+```bash
+pytest -q
 ```
 
 ### EXE 빌드 (PyInstaller)
@@ -419,13 +449,18 @@ python -m PyInstaller ctxsnap_win.spec
 |-----------|------|
 | `ctxsnap_win.py` | 메인 애플리케이션 진입점 |
 | `ctxsnap/` | 핵심 패키지 |
-| `ctxsnap/core/` | 핵심 로직 (워커, 로깅 등) |
+| `ctxsnap/core/` | 로깅/워커/보안/동기화 엔진 |
+| `ctxsnap/core/sync/` | SyncProvider 프로토콜 + 엔진 + provider 구현 |
+| `ctxsnap/services/` | Snapshot/Restore/Backup/Search 서비스 레이어 |
 | `ctxsnap/ui/` | UI 컴포넌트 (Dialogs, Widgets) |
+| `ctxsnap/ui/main_window_sections/` | 메인 윈도우 기능 분할 섹션 |
 | `ctxsnap/ui/dialogs/` | 각종 설정 및 기능 다이얼로그 |
 | `ctxsnap/i18n.py` | 다국어 지원 모듈 |
 | `ctxsnap/app_storage.py` | 데이터 저장소 관리 |
 | `ctxsnap/utils.py` | 유틸리티 함수 |
 | `assets/` | 아이콘/이미지 |
+| `tests/` | pytest 기반 자동 테스트 |
+| `.github/workflows/ci.yml` | Windows CI 테스트 파이프라인 |
 | `installer/` | Inno Setup 스크립트 |
 
 ---
@@ -488,13 +523,15 @@ python -m PyInstaller ctxsnap_win.spec
 
 - [ ] 크로스 플랫폼 지원 (macOS, Linux)
 - [ ] 팀 협업 기능 (스냅샷 공유)
-- [ ] 클라우드 동기화
+- [x] 로컬 동기화 provider + 충돌 큐
+- [x] DPAPI 기반 선택 암호화(기능 플래그)
+- [ ] 클라우드 provider 실연동
 - [ ] Slack/Notion 연동
-- [ ] 스냅샷 암호화
+- [ ] 검색 UX 고도화(저장 쿼리 관리 UI)
 
 ### 💡 기능 제안
 
-새로운 기능 아이디어가 있다면 [Issues](https://github.com/your-repo/ctxsnap/issues)에 제안해 주세요!
+새로운 기능 아이디어가 있다면 [Issues](https://github.com/twbeatles/context-snapshot/issues)에 제안해 주세요!
 
 ---
 

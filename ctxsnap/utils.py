@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 from PySide6 import QtWidgets
@@ -304,19 +304,62 @@ def git_title_suggestion(root: Path) -> Optional[str]:
         return None
 
 
-def git_state(root: Path) -> Optional[Tuple[str, str]]:
+def git_state_details(root: Path) -> Optional[Dict[str, Any]]:
     git = shutil.which("git")
     if not git:
         return None
     if not (root / ".git").exists():
         return None
     try:
-        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, timeout=5).strip()
-        sha = subprocess.check_output([git, "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=5).strip()
-        return branch, sha
+        branch = subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            timeout=5,
+        ).strip()
+        sha = subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "HEAD"],
+            text=True,
+            timeout=5,
+        ).strip()
+        porcelain = subprocess.check_output(
+            [git, "-C", str(root), "status", "--porcelain"],
+            text=True,
+            timeout=5,
+        )
+        changed = 0
+        staged = 0
+        untracked = 0
+        for line in porcelain.splitlines():
+            if not line:
+                continue
+            if line.startswith("??"):
+                untracked += 1
+                continue
+            x = line[0:1]
+            y = line[1:2]
+            if x and x != " ":
+                staged += 1
+            if y and y != " ":
+                changed += 1
+        dirty = bool(changed or staged or untracked)
+        return {
+            "branch": branch,
+            "sha": sha,
+            "dirty": dirty,
+            "changed": changed,
+            "staged": staged,
+            "untracked": untracked,
+        }
     except Exception as e:
         LOGGER.debug("Git state check failed: %s", e)
         return None
+
+
+def git_state(root: Path) -> Optional[Tuple[str, str]]:
+    details = git_state_details(root)
+    if not details:
+        return None
+    return str(details.get("branch", "")), str(details.get("sha", ""))
 
 
 def log_exc(context: str, e: Exception) -> None:

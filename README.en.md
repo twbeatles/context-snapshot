@@ -41,10 +41,14 @@
 | **Git Integration** | Auto-suggest title from branch + commit info |
 | **Tags/Pin** | Categorize (work/personal) and pin important snapshots |
 | **Unified Search** | Search across title/notes/TODO/files/processes |
+| **Field Query Search** | Advanced query tokens like `tag:`, `root:`, `todo:` (dev flag) |
 | **Auto Snapshot** | Auto-save periodically or on Git changes |
 | **Templates** | Save frequently used configurations |
 | **Snapshot Comparison** | Compare differences between two snapshots |
 | **Backup/Restore** | Backup settings and snapshot data |
+| **Selective DPAPI Encryption** | Encrypt note/TODO/process/app fields selectively (dev flag) |
+| **Local Sync Engine** | Plugin-based sync with local provider and conflict queue |
+| **Restore Profiles** | Save/apply restore option presets (dev flag) |
 | **Restore History** | Review and re-run recent restore actions |
 | **Onboarding** | Built-in first-run usage guide |
 | **Bilingual UI** | Korean/English support (auto-detect + manual switch) |
@@ -55,21 +59,21 @@
 
 ### Option 1: Installer (Recommended)
 
-1. Download `CtxSnap_Setup.exe` from [Releases](https://github.com/your-repo/ctxsnap/releases)
+1. Download `CtxSnap_Setup.exe` from [Releases](https://github.com/twbeatles/context-snapshot/releases)
 2. Run the installer
 3. Launch **CtxSnap** from the Start menu
 
 ### Option 2: Portable
 
-1. Download `CtxSnap.zip` from [Releases](https://github.com/your-repo/ctxsnap/releases)
+1. Download `CtxSnap.zip` from [Releases](https://github.com/twbeatles/context-snapshot/releases)
 2. Extract and run `CtxSnap.exe`
 
 ### Option 3: From Source
 
 ```bash
 # Clone repository
-git clone https://github.com/your-repo/ctxsnap.git
-cd ctxsnap
+git clone https://github.com/twbeatles/context-snapshot.git
+cd context-snapshot
 
 # Install dependencies
 pip install -r requirements.txt
@@ -198,6 +202,7 @@ The search bar provides unified search across:
 **Search Tips:**
 - Space-separated keywords (AND condition)
 - Case-insensitive
+- With advanced search enabled, field queries are supported: `tag:work root:context-snapshot todo:deploy`
 
 ---
 
@@ -330,6 +335,22 @@ CtxSnap resides in the system tray.
 | Auto Snapshot Interval | Minutes, 0=disabled | `0` |
 | Git Change Detection | Auto-save on Git changes | `false` |
 
+### Developer/Sync/Security/Search (inside General tab)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Enable Sync Feature | Enable sync feature set | `false` |
+| Enable Security Feature | Enable DPAPI security flow | `false` |
+| Enable Advanced Search | Enable field query parser | `false` |
+| Enable Restore Profiles | Enable restore profile presets | `false` |
+| Sync Provider | Sync provider (`local`/`cloud_stub`) | `local` |
+| Local Sync Root | Local sync target folder | `%APPDATA%\\ctxsnap\\sync_local` |
+| Sync Interval | Auto sync interval in minutes, 0=off | `0` |
+| Enable DPAPI | Turn on Windows DPAPI | `false` |
+| Encrypt Note/TODO/Processes/Running Apps | Selective sensitive-field encryption | `true` |
+| Enable Field Query | Enable `tag:`, `root:`, `todo:` tokens | `true` |
+| Saved Queries | Search presets | `[]` |
+
 ### Restore Tab
 
 | Setting | Description | Default |
@@ -363,6 +384,8 @@ All data is stored in `%APPDATA%\ctxsnap\`.
 ├── index.json              # Snapshot index (search cache)
 ├── settings.json           # App settings
 ├── restore_history.json    # Restore history
+├── sync_conflicts.json     # Sync conflict queue
+├── sync_state.json         # Sync state (cursor/last sync)
 └── logs/
     └── ctxsnap.log         # Log file (rotating)
 ```
@@ -377,8 +400,8 @@ All data is stored in `%APPDATA%\ctxsnap\`.
 
 ```bash
 # Clone repository
-git clone https://github.com/your-repo/ctxsnap.git
-cd ctxsnap
+git clone https://github.com/twbeatles/context-snapshot.git
+cd context-snapshot
 
 # Create virtual environment (recommended)
 python -m venv venv
@@ -386,9 +409,16 @@ venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Run in development mode
 python ctxsnap_win.py
+```
+
+### Tests
+
+```bash
+pytest -q
 ```
 
 ### Build EXE (PyInstaller)
@@ -416,10 +446,15 @@ python -m PyInstaller ctxsnap_win.spec
 |-------------|-------------|
 | `ctxsnap_win.py` | Main application (UI + logic) |
 | `ctxsnap/` | Core package |
+| `ctxsnap/core/` | Logging/worker/security/sync engine |
+| `ctxsnap/core/sync/` | Sync protocol + engine + providers |
+| `ctxsnap/services/` | Snapshot/Restore/Backup/Search services |
+| `ctxsnap/ui/main_window_sections/` | Split sections for MainWindow behaviors |
+| `ctxsnap/app_storage.py` | Storage, migrations, backup I/O |
 | `ctxsnap/utils.py` | Utility functions |
-| `ctxsnap/storage.py` | Basic storage |
-| `ctxsnap/app_storage.py` | Advanced storage |
 | `assets/` | Icons/images |
+| `tests/` | pytest-based automated tests |
+| `.github/workflows/ci.yml` | Windows CI pipeline |
 | `installer/` | Inno Setup scripts |
 
 ---
@@ -482,13 +517,15 @@ Please attach this file when creating issues.
 
 - [ ] Cross-platform support (macOS, Linux)
 - [ ] Team collaboration (snapshot sharing)
-- [ ] Cloud synchronization
+- [x] Local sync provider + conflict queue
+- [x] DPAPI-based selective encryption (feature-flagged)
+- [ ] Production cloud provider integration
 - [ ] Slack/Notion integration
-- [ ] Snapshot encryption
+- [ ] Search UX improvements for saved queries
 
 ### 💡 Feature Suggestions
 
-Have a new feature idea? Please suggest it in [Issues](https://github.com/your-repo/ctxsnap/issues)!
+Have a new feature idea? Please suggest it in [Issues](https://github.com/twbeatles/context-snapshot/issues)!
 
 ---
 

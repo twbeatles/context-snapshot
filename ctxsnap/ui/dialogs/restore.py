@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from PySide6 import QtCore, QtWidgets
 from ctxsnap.i18n import tr
 
@@ -13,6 +13,9 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         open_terminal: bool,
         open_vscode: bool,
         open_running_apps: bool,
+        *,
+        profiles: Optional[List[Dict[str, Any]]] = None,
+        selected_profile: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle(tr("Restore preview"))
@@ -36,15 +39,35 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         self.cb_terminal = QtWidgets.QCheckBox("💻 " + tr("Open terminal"))
         self.cb_vscode = QtWidgets.QCheckBox("🔷 " + tr("Open VSCode"))
         self.cb_running_apps = QtWidgets.QCheckBox("📱 " + tr("Open running apps"))
+        self.cb_checklist = QtWidgets.QCheckBox("✅ " + tr("Show post-restore checklist"))
         self.cb_folder.setChecked(open_folder)
         self.cb_terminal.setChecked(open_terminal)
         self.cb_vscode.setChecked(open_vscode)
         self.cb_running_apps.setChecked(open_running_apps)
+        self.cb_checklist.setChecked(True)
         
         options_layout.addWidget(self.cb_folder)
         options_layout.addWidget(self.cb_terminal)
         options_layout.addWidget(self.cb_vscode)
         options_layout.addWidget(self.cb_running_apps)
+        options_layout.addWidget(self.cb_checklist)
+
+        self.profile_combo: Optional[QtWidgets.QComboBox] = None
+        self._profiles = [p for p in (profiles or []) if isinstance(p, dict) and str(p.get("name", "")).strip()]
+        if self._profiles:
+            profile_row = QtWidgets.QHBoxLayout()
+            profile_label = QtWidgets.QLabel("🧩 " + tr("Restore Profile"))
+            self.profile_combo = QtWidgets.QComboBox()
+            for profile in self._profiles:
+                self.profile_combo.addItem(str(profile.get("name", "")), profile)
+            idx = self.profile_combo.findText(selected_profile)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+            self.profile_combo.currentIndexChanged.connect(self._apply_selected_profile)
+            profile_row.addWidget(profile_label)
+            profile_row.addWidget(self.profile_combo, 1)
+            options_layout.addLayout(profile_row)
+            self._apply_selected_profile(self.profile_combo.currentIndex())
 
         root = snap.get("root", "")
         note = snap.get("note", "")
@@ -113,17 +136,34 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         layout.addWidget(info, 1)
         layout.addLayout(btn_row)
 
+    def _apply_selected_profile(self, row: int) -> None:
+        if not self.profile_combo:
+            return
+        profile = self.profile_combo.itemData(row)
+        if not isinstance(profile, dict):
+            return
+        self.cb_folder.setChecked(bool(profile.get("open_folder", self.cb_folder.isChecked())))
+        self.cb_terminal.setChecked(bool(profile.get("open_terminal", self.cb_terminal.isChecked())))
+        self.cb_vscode.setChecked(bool(profile.get("open_vscode", self.cb_vscode.isChecked())))
+        self.cb_running_apps.setChecked(bool(profile.get("open_running_apps", self.cb_running_apps.isChecked())))
+        self.cb_checklist.setChecked(bool(profile.get("show_checklist", self.cb_checklist.isChecked())))
+
     def choices(self) -> Dict[str, Any]:
         selected_apps = []
         for i in range(self.apps_list.count()):
             it = self.apps_list.item(i)
             if it.checkState() == QtCore.Qt.Checked:
                 selected_apps.append(it.data(QtCore.Qt.UserRole))
+        profile_name = ""
+        if self.profile_combo is not None:
+            profile_name = str(self.profile_combo.currentText() or "")
         return {
             "open_folder": self.cb_folder.isChecked(),
             "open_terminal": self.cb_terminal.isChecked(),
             "open_vscode": self.cb_vscode.isChecked(),
             "open_running_apps": self.cb_running_apps.isChecked(),
+            "show_checklist": self.cb_checklist.isChecked(),
+            "profile_name": profile_name,
             "running_apps": selected_apps,
         }
 

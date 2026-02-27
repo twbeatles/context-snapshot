@@ -2,10 +2,27 @@
 
 block_cipher = None
 
-# Remove aggressive collection of all PySide6 modules to save space
-# from PyInstaller.utils.hooks import collect_submodules
-# hiddenimports = collect_submodules('PySide6')
-hiddenimports = []
+# Keep explicit hidden imports for modularized sections/services to improve build determinism.
+hiddenimports = [
+    'ctxsnap.services',
+    'ctxsnap.services.snapshot_service',
+    'ctxsnap.services.restore_service',
+    'ctxsnap.services.backup_service',
+    'ctxsnap.services.search_service',
+    'ctxsnap.core.security',
+    'ctxsnap.core.sync',
+    'ctxsnap.core.sync.base',
+    'ctxsnap.core.sync.engine',
+    'ctxsnap.core.sync.providers',
+    'ctxsnap.core.sync.providers.local',
+    'ctxsnap.core.sync.providers.cloud_stub',
+    'ctxsnap.ui.main_window_sections',
+    'ctxsnap.ui.main_window_sections.automation',
+    'ctxsnap.ui.main_window_sections.list_view',
+    'ctxsnap.ui.main_window_sections.snapshot_crud',
+    'ctxsnap.ui.main_window_sections.settings_backup',
+    'ctxsnap.ui.main_window_sections.restore_actions',
+]
 
 a = Analysis(
     ['ctxsnap_win.py'],

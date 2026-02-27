@@ -41,6 +41,7 @@ class SettingsDialog(QtWidgets.QDialog):
     """
     
     settingsImported = QtCore.Signal(dict)
+    syncRequested = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget, settings: Dict[str, Any], *, index_path: Path, snaps_dir: Path):
         super().__init__(parent)
@@ -131,6 +132,53 @@ class SettingsDialog(QtWidgets.QDialog):
         restore_l.addWidget(self.rs_checklist)
         restore_l.addSpacing(12)
         restore_l.addWidget(self.preview_default)
+
+        self.restore_profiles_list = QtWidgets.QListWidget()
+        self.restore_profiles_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.restore_profiles_list.setMaximumHeight(120)
+        self.rp_name = QtWidgets.QLineEdit()
+        self.rp_name.setPlaceholderText(tr("Profile name"))
+        self.rp_default = QtWidgets.QCheckBox(tr("Default profile"))
+        self.rp_folder = QtWidgets.QCheckBox(tr("Open folder on restore"))
+        self.rp_terminal = QtWidgets.QCheckBox(tr("Open terminal on restore"))
+        self.rp_vscode = QtWidgets.QCheckBox(tr("Open VSCode on restore"))
+        self.rp_running_apps = QtWidgets.QCheckBox(tr("Restore apps on restore"))
+        self.rp_checklist = QtWidgets.QCheckBox(tr("Show post-restore checklist"))
+        self.rp_folder.setChecked(True)
+        self.rp_terminal.setChecked(True)
+        self.rp_vscode.setChecked(True)
+        self.rp_checklist.setChecked(True)
+        self.btn_rp_add = QtWidgets.QPushButton("💾 " + tr("Add / Update"))
+        self.btn_rp_add.setProperty("primary", True)
+        self.btn_rp_remove = QtWidgets.QPushButton("🗑 " + tr("Delete"))
+        self.btn_rp_remove.setProperty("danger", True)
+        self.btn_rp_add.clicked.connect(self.add_or_update_restore_profile)
+        self.btn_rp_remove.clicked.connect(self.remove_restore_profile)
+        self.restore_profiles_list.currentRowChanged.connect(self.load_restore_profile)
+        self._restore_profiles_cache: List[Dict[str, Any]] = []
+        self._load_restore_profiles(settings.get("restore_profiles", []))
+
+        rp_form = QtWidgets.QFormLayout()
+        rp_form.addRow("📝 " + tr("Name"), self.rp_name)
+        rp_form.addRow("", self.rp_default)
+        rp_form.addRow("", self.rp_folder)
+        rp_form.addRow("", self.rp_terminal)
+        rp_form.addRow("", self.rp_vscode)
+        rp_form.addRow("", self.rp_running_apps)
+        rp_form.addRow("", self.rp_checklist)
+
+        rp_btns = QtWidgets.QHBoxLayout()
+        rp_btns.setSpacing(8)
+        rp_btns.addWidget(self.btn_rp_add)
+        rp_btns.addWidget(self.btn_rp_remove)
+        rp_btns.addStretch(1)
+
+        rp_box = QtWidgets.QGroupBox("🧩 " + tr("Restore Profiles"))
+        rp_box_l = QtWidgets.QVBoxLayout(rp_box)
+        rp_box_l.addWidget(self.restore_profiles_list)
+        rp_box_l.addLayout(rp_form)
+        rp_box_l.addLayout(rp_btns)
+
         restore_hint = QtWidgets.QLabel("💡 " + tr("Restore Preview Hint"))
         restore_hint.setObjectName("HintLabel")
         restore_hint.setWordWrap(True)
@@ -138,6 +186,7 @@ class SettingsDialog(QtWidgets.QDialog):
         restore_layout.setSpacing(12)
         restore_layout.setContentsMargins(16, 16, 16, 16)
         restore_layout.addWidget(restore_box)
+        restore_layout.addWidget(rp_box)
         restore_layout.addWidget(restore_hint)
         restore_layout.addStretch(1)
 
@@ -250,6 +299,78 @@ class SettingsDialog(QtWidgets.QDialog):
         archive_layout.addRow("", self.archive_skip_pinned)
         archive_layout.addRow("💾 " + tr("Auto backup interval") + ":", self.auto_backup_hours)
 
+        # Developer flags / Sync / Security / Search
+        dev_flags = settings.get("dev_flags", {})
+        self.flag_sync_enabled = QtWidgets.QCheckBox("🛰️ " + tr("Enable Sync Feature"))
+        self.flag_security_enabled = QtWidgets.QCheckBox("🔐 " + tr("Enable Security Feature"))
+        self.flag_adv_search_enabled = QtWidgets.QCheckBox("🔎 " + tr("Enable Advanced Search"))
+        self.flag_restore_profiles_enabled = QtWidgets.QCheckBox("🧩 " + tr("Enable Restore Profiles"))
+        self.flag_sync_enabled.setChecked(bool(dev_flags.get("sync_enabled", False)))
+        self.flag_security_enabled.setChecked(bool(dev_flags.get("security_enabled", False)))
+        self.flag_adv_search_enabled.setChecked(bool(dev_flags.get("advanced_search_enabled", False)))
+        self.flag_restore_profiles_enabled.setChecked(bool(dev_flags.get("restore_profiles_enabled", False)))
+
+        dev_box = QtWidgets.QGroupBox("🛠️ " + tr("Developer Features"))
+        dev_layout = QtWidgets.QVBoxLayout(dev_box)
+        dev_layout.setSpacing(6)
+        dev_layout.addWidget(self.flag_sync_enabled)
+        dev_layout.addWidget(self.flag_security_enabled)
+        dev_layout.addWidget(self.flag_adv_search_enabled)
+        dev_layout.addWidget(self.flag_restore_profiles_enabled)
+
+        sync_cfg = settings.get("sync", {})
+        self.sync_provider = NoScrollComboBox()
+        self.sync_provider.addItem("local", "local")
+        self.sync_provider.addItem("cloud_stub", "cloud_stub")
+        idx_sync = self.sync_provider.findData(str(sync_cfg.get("provider", "local")))
+        if idx_sync >= 0:
+            self.sync_provider.setCurrentIndex(idx_sync)
+        self.sync_local_root = QtWidgets.QLineEdit(str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync"))))
+        self.sync_interval_minutes = NoScrollSpinBox()
+        self.sync_interval_minutes.setRange(0, 1440)
+        self.sync_interval_minutes.setSuffix(tr("suffix_min"))
+        self.sync_interval_minutes.setValue(int(sync_cfg.get("auto_interval_min", 0)))
+        self.btn_sync_now = QtWidgets.QPushButton("🔄 " + tr("Sync Now"))
+        self.btn_sync_now.clicked.connect(self.syncRequested.emit)
+        sync_box = QtWidgets.QGroupBox("🛰️ " + tr("Sync Settings"))
+        sync_layout = QtWidgets.QFormLayout(sync_box)
+        sync_layout.setSpacing(8)
+        sync_layout.addRow(tr("Provider"), self.sync_provider)
+        sync_layout.addRow(tr("Local Sync Root"), self.sync_local_root)
+        sync_layout.addRow(tr("Sync Interval (minutes)"), self.sync_interval_minutes)
+        sync_layout.addRow("", self.btn_sync_now)
+
+        security_cfg = settings.get("security", {})
+        self.dpapi_enabled = QtWidgets.QCheckBox("🔐 " + tr("Enable DPAPI"))
+        self.dpapi_enabled.setChecked(bool(security_cfg.get("dpapi_enabled", False)))
+        self.sec_note = QtWidgets.QCheckBox("📝 " + tr("Encrypt Note"))
+        self.sec_todos = QtWidgets.QCheckBox("✅ " + tr("Encrypt TODOs"))
+        self.sec_processes = QtWidgets.QCheckBox("⚙️ " + tr("Encrypt Processes"))
+        self.sec_apps = QtWidgets.QCheckBox("📱 " + tr("Encrypt Running Apps"))
+        self.sec_note.setChecked(bool(security_cfg.get("encrypt_note", True)))
+        self.sec_todos.setChecked(bool(security_cfg.get("encrypt_todos", True)))
+        self.sec_processes.setChecked(bool(security_cfg.get("encrypt_processes", True)))
+        self.sec_apps.setChecked(bool(security_cfg.get("encrypt_running_apps", True)))
+        sec_box = QtWidgets.QGroupBox("🔐 " + tr("Security Settings"))
+        sec_layout = QtWidgets.QVBoxLayout(sec_box)
+        sec_layout.setSpacing(6)
+        sec_layout.addWidget(self.dpapi_enabled)
+        sec_layout.addWidget(self.sec_note)
+        sec_layout.addWidget(self.sec_todos)
+        sec_layout.addWidget(self.sec_processes)
+        sec_layout.addWidget(self.sec_apps)
+
+        search_cfg = settings.get("search", {})
+        self.search_enable_field_query = QtWidgets.QCheckBox("🔎 " + tr("Enable Field Query"))
+        self.search_enable_field_query.setChecked(bool(search_cfg.get("enable_field_query", True)))
+        self.search_saved_queries = QtWidgets.QLineEdit(", ".join(search_cfg.get("saved_queries", [])))
+        self.search_saved_queries.setPlaceholderText(tr("Saved queries (comma-separated)"))
+        search_box = QtWidgets.QGroupBox("🔎 " + tr("Search Settings"))
+        search_layout = QtWidgets.QFormLayout(search_box)
+        search_layout.setSpacing(8)
+        search_layout.addRow("", self.search_enable_field_query)
+        search_layout.addRow(tr("Saved Queries"), self.search_saved_queries)
+
         # Filters section
         self.exclude_dirs = QtWidgets.QLineEdit()
         self.exclude_dirs.setPlaceholderText(tr("Exclude dirs (comma-separated)"))
@@ -288,6 +409,10 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addWidget(capture_box)
         general_layout.addWidget(auto_box)
         general_layout.addWidget(archive_box)
+        general_layout.addWidget(dev_box)
+        general_layout.addWidget(sync_box)
+        general_layout.addWidget(sec_box)
+        general_layout.addWidget(search_box)
         general_layout.addWidget(filter_box)
         general_layout.addWidget(privacy_hint)
         general_layout.addStretch(1)
@@ -409,6 +534,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.exp_index.setChecked(True)
         self.exp_snaps = QtWidgets.QCheckBox("📸 " + tr("Include snapshots"))
         self.exp_snaps.setChecked(True)
+        self.exp_encrypt_backup = QtWidgets.QCheckBox("🔐 " + tr("Encrypt backup with DPAPI"))
+        self.exp_encrypt_backup.setChecked(False)
 
         exp_box = QtWidgets.QGroupBox("📤 " + tr("Export options group"))
         exp_l = QtWidgets.QVBoxLayout(exp_box)
@@ -416,6 +543,7 @@ class SettingsDialog(QtWidgets.QDialog):
         exp_l.addWidget(self.exp_settings)
         exp_l.addWidget(self.exp_index)
         exp_l.addWidget(self.exp_snaps)
+        exp_l.addWidget(self.exp_encrypt_backup)
 
         self.btn_export = QtWidgets.QPushButton("📤 " + tr("Export Backup"))
         self.btn_export.setProperty("primary", True)
@@ -494,7 +622,10 @@ class SettingsDialog(QtWidgets.QDialog):
             return
         try:
             # Always export migrated settings; include data optionally
-            vals = migrate_settings(self.values() | {"onboarding_shown": True})
+            merged = dict(self._settings)
+            merged.update(self.values())
+            merged["onboarding_shown"] = True
+            vals = migrate_settings(merged)
             export_backup_to_file(
                 Path(path),
                 settings=vals,
@@ -502,6 +633,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 index_path=self._index_path,
                 include_snapshots=bool(self.exp_snaps.isChecked()),
                 include_index=bool(self.exp_index.isChecked()),
+                encrypt_backup=bool(self.exp_encrypt_backup.isChecked()),
             )
             self.b_msg.setText(f"✅ {tr('Exported')}{path}")
         except Exception as e:
@@ -600,6 +732,27 @@ class SettingsDialog(QtWidgets.QDialog):
         self.archive_after_days.setValue(int(settings.get("archive_after_days", 0)))
         self.archive_skip_pinned.setChecked(bool(settings.get("archive_skip_pinned", True)))
         self.auto_backup_hours.setValue(int(settings.get("auto_backup_hours", 0)))
+        dev_flags = settings.get("dev_flags", {})
+        self.flag_sync_enabled.setChecked(bool(dev_flags.get("sync_enabled", False)))
+        self.flag_security_enabled.setChecked(bool(dev_flags.get("security_enabled", False)))
+        self.flag_adv_search_enabled.setChecked(bool(dev_flags.get("advanced_search_enabled", False)))
+        self.flag_restore_profiles_enabled.setChecked(bool(dev_flags.get("restore_profiles_enabled", False)))
+        sync_cfg = settings.get("sync", {})
+        idx_sync = self.sync_provider.findData(str(sync_cfg.get("provider", "local")))
+        if idx_sync >= 0:
+            self.sync_provider.setCurrentIndex(idx_sync)
+        self.sync_local_root.setText(str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync"))))
+        self.sync_interval_minutes.setValue(int(sync_cfg.get("auto_interval_min", 0)))
+        sec_cfg = settings.get("security", {})
+        self.dpapi_enabled.setChecked(bool(sec_cfg.get("dpapi_enabled", False)))
+        self.sec_note.setChecked(bool(sec_cfg.get("encrypt_note", True)))
+        self.sec_todos.setChecked(bool(sec_cfg.get("encrypt_todos", True)))
+        self.sec_processes.setChecked(bool(sec_cfg.get("encrypt_processes", True)))
+        self.sec_apps.setChecked(bool(sec_cfg.get("encrypt_running_apps", True)))
+        search_cfg = settings.get("search", {})
+        self.search_enable_field_query.setChecked(bool(search_cfg.get("enable_field_query", True)))
+        self.search_saved_queries.setText(", ".join(search_cfg.get("saved_queries", [])))
+        self._load_restore_profiles(settings.get("restore_profiles", []))
 
         self.tags_list.clear()
         for t in (settings.get("tags") or DEFAULT_TAGS):
@@ -675,6 +828,65 @@ class SettingsDialog(QtWidgets.QDialog):
         self._templates_cache.pop(row)
         self.templates_list.takeItem(row)
 
+    def _load_restore_profiles(self, profiles: List[Dict[str, Any]]) -> None:
+        self._restore_profiles_cache = [p for p in (profiles or []) if isinstance(p, dict)]
+        self.restore_profiles_list.clear()
+        for profile in self._restore_profiles_cache:
+            self.restore_profiles_list.addItem(str(profile.get("name", "Default")))
+        self.rp_name.clear()
+        self.rp_default.setChecked(False)
+        self.rp_folder.setChecked(True)
+        self.rp_terminal.setChecked(True)
+        self.rp_vscode.setChecked(True)
+        self.rp_running_apps.setChecked(False)
+        self.rp_checklist.setChecked(True)
+
+    def load_restore_profile(self, row: int) -> None:
+        if row < 0 or row >= len(self._restore_profiles_cache):
+            return
+        profile = self._restore_profiles_cache[row]
+        self.rp_name.setText(str(profile.get("name", "")))
+        self.rp_default.setChecked(bool(profile.get("default", False)))
+        self.rp_folder.setChecked(bool(profile.get("open_folder", True)))
+        self.rp_terminal.setChecked(bool(profile.get("open_terminal", True)))
+        self.rp_vscode.setChecked(bool(profile.get("open_vscode", True)))
+        self.rp_running_apps.setChecked(bool(profile.get("open_running_apps", False)))
+        self.rp_checklist.setChecked(bool(profile.get("show_checklist", True)))
+
+    def add_or_update_restore_profile(self) -> None:
+        name = self.rp_name.text().strip() or "Default"
+        profile = {
+            "name": name,
+            "default": bool(self.rp_default.isChecked()),
+            "open_folder": bool(self.rp_folder.isChecked()),
+            "open_terminal": bool(self.rp_terminal.isChecked()),
+            "open_vscode": bool(self.rp_vscode.isChecked()),
+            "open_running_apps": bool(self.rp_running_apps.isChecked()),
+            "show_checklist": bool(self.rp_checklist.isChecked()),
+        }
+        row = self.restore_profiles_list.currentRow()
+        if row >= 0 and row < len(self._restore_profiles_cache):
+            self._restore_profiles_cache[row] = profile
+            self.restore_profiles_list.item(row).setText(name)
+        else:
+            self._restore_profiles_cache.append(profile)
+            self.restore_profiles_list.addItem(name)
+            self.restore_profiles_list.setCurrentRow(len(self._restore_profiles_cache) - 1)
+        if profile["default"]:
+            for i, existing in enumerate(self._restore_profiles_cache):
+                if i != self.restore_profiles_list.currentRow():
+                    existing["default"] = False
+
+    def remove_restore_profile(self) -> None:
+        row = self.restore_profiles_list.currentRow()
+        if row < 0 or row >= len(self._restore_profiles_cache):
+            return
+        removed_default = bool(self._restore_profiles_cache[row].get("default", False))
+        self._restore_profiles_cache.pop(row)
+        self.restore_profiles_list.takeItem(row)
+        if removed_default and self._restore_profiles_cache:
+            self._restore_profiles_cache[0]["default"] = True
+
     def imported_payload(self):
         return self._imported_payload
 
@@ -695,7 +907,9 @@ class SettingsDialog(QtWidgets.QDialog):
             t = self.tags_list.item(i).text().strip()
             if t:
                 tags.append(t)
+        saved_queries = [part.strip() for part in self.search_saved_queries.text().split(",") if part.strip()]
         return {
+            "schema_version": 2,
             "language": self.lang_combo.currentData(),
             "recent_files_limit": int(self.recent_spin.value()),
             "restore_preview_default": bool(self.preview_default.isChecked()),
@@ -734,6 +948,30 @@ class SettingsDialog(QtWidgets.QDialog):
             "templates": self._templates_cache,
             "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
             "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
+            "dev_flags": {
+                "sync_enabled": bool(self.flag_sync_enabled.isChecked()),
+                "security_enabled": bool(self.flag_security_enabled.isChecked()),
+                "advanced_search_enabled": bool(self.flag_adv_search_enabled.isChecked()),
+                "restore_profiles_enabled": bool(self.flag_restore_profiles_enabled.isChecked()),
+            },
+            "sync": {
+                "provider": str(self.sync_provider.currentData() or "local"),
+                "local_root": self.sync_local_root.text().strip(),
+                "auto_interval_min": int(self.sync_interval_minutes.value()),
+                "last_cursor": str(self._settings.get("sync", {}).get("last_cursor", "")),
+            },
+            "security": {
+                "dpapi_enabled": bool(self.dpapi_enabled.isChecked()),
+                "encrypt_note": bool(self.sec_note.isChecked()),
+                "encrypt_todos": bool(self.sec_todos.isChecked()),
+                "encrypt_processes": bool(self.sec_processes.isChecked()),
+                "encrypt_running_apps": bool(self.sec_apps.isChecked()),
+            },
+            "search": {
+                "enable_field_query": bool(self.search_enable_field_query.isChecked()),
+                "saved_queries": saved_queries,
+            },
+            "restore_profiles": self._restore_profiles_cache,
             "recent_files_exclude": [
                 part.strip() for part in self.exclude_dirs.text().split(",") if part.strip()
             ],
