@@ -233,20 +233,35 @@ class MainWindowSnapshotCrudSection:
         proc = snap.get("processes", [])
         running_apps = snap.get("running_apps", [])
         
-        text = (
-            f"NOTE:\n{snap.get('note','') or '(none)'}\n\n"
-            f"TODOs:\n"
-            f"  1) {todos[0] if len(todos)>0 else ''}\n"
-            f"  2) {todos[1] if len(todos)>1 else ''}\n"
-            f"  3) {todos[2] if len(todos)>2 else ''}\n\n"
-            f"Recent files (top 12):\n" +
-            "".join([f"  - {p}\n" for p in recent[:12]]) +
-            f"\nProcesses (filtered, {len(proc)}):\n" +
-            "".join([f"  - {p.get('name','')}   {p.get('exe','')}\n" for p in proc[:20]]) +
-            f"\nRunning apps (taskbar, {len(running_apps)}):\n" +
-            "".join([f"  - {p.get('name','')}   {p.get('exe','')}\n" for p in running_apps[:20]])
-        )
-        self.detail.setText(text)
+        note_content = snap.get('note', '') or '(none)'
+        todos_html = "".join([f"<li>{t}</li>" for t in todos if t.strip()]) or "(no todos)"
+        recent_html = "".join([f"<li>{p}</li>" for p in recent[:12]]) or "<li>(none)</li>"
+        proc_html = "".join([f"<li><b>{p.get('name','')}</b> <span style='color:gray;'>{p.get('exe','')}</span></li>" for p in proc[:20]]) or "<li>(none)</li>"
+        apps_html = "".join([f"<li><b>{p.get('name','')}</b> <span style='color:gray;'>{p.get('exe','')}</span></li>" for p in running_apps[:20]]) or "<li>(none)</li>"
+        
+        html = f"""
+        <style>
+            h3 {{ color: #a78bfa; margin-bottom: 2px; margin-top: 14px; font-size: 14px; }}
+            ul {{ margin-top: 2px; margin-bottom: 6px; padding-left: 20px; }}
+            li {{ margin-top: 2px; }}
+            p {{ margin-top: 2px; margin-bottom: 6px; }}
+        </style>
+        <h3>📝 NOTE</h3>
+        <p>{note_content}</p>
+        
+        <h3>✅ TODOs</h3>
+        <ul>{todos_html}</ul>
+        
+        <h3>📂 Recent files (top 12)</h3>
+        <ul>{recent_html}</ul>
+        
+        <h3>⚙️ Processes (filtered, {len(proc)})</h3>
+        <ul>{proc_html}</ul>
+        
+        <h3>💻 Running apps (taskbar, {len(running_apps)})</h3>
+        <ul>{apps_html}</ul>
+        """
+        self.detail.setHtml(html)
 
     # ----- actions -----
     def edit_selected(self) -> None:

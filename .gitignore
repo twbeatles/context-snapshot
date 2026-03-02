@@ -1,8 +1,18 @@
+<<<<<<< HEAD
 # Python bytecode/cache
+=======
+# 빌드 및 실행 산출물
+build/
+dist/
+*.exe
+
+# Python 캐시
+>>>>>>> 263e8f0 (feat(ui): refactor UI/UX with modern card design, HTML delegate, and empty state)
 __pycache__/
 *.py[cod]
 *$py.class
 
+<<<<<<< HEAD
 # Test and coverage artifacts
 .pytest_cache/
 .coverage
@@ -35,3 +45,14 @@ backups/
 .idea/
 *.swp
 *.swo
+=======
+# IDE 설정
+.vscode/
+
+# 사용자 설정
+.env
+
+# 각종 로컬 설정
+*.json
+*.log
+>>>>>>> 263e8f0 (feat(ui): refactor UI/UX with modern card design, HTML delegate, and empty state)

@@ -165,6 +165,13 @@ class MainWindowListViewSection:
                 f"{tr('Storage:')} {showing} / {len(view_items)} (Total {total_all})"
             )
         self._update_pagination_controls()
+        
+        # Toggle Empty State
+        if hasattr(self, "list_stack") and hasattr(self, "empty_state"):
+            if not view_items:
+                self.list_stack.setCurrentWidget(self.empty_state)
+            else:
+                self.list_stack.setCurrentWidget(self.listw)
 
     def selected_id(self) -> Optional[str]:
         idx = self.listw.currentIndex()
