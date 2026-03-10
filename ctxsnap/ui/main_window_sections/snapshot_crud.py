@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# pyright: reportAttributeAccessIssue=false
 
 import copy
 import hashlib
@@ -6,7 +8,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtCore, QtWidgets
 
@@ -29,6 +31,10 @@ LOGGER = get_logger()
 
 
 class MainWindowSnapshotCrudSection:
+    @staticmethod
+    def _parent_widget(instance: object) -> QtWidgets.QWidget:
+        return cast(QtWidgets.QWidget, instance)
+
     def snap_path(self, sid: str) -> Path:
         return self.snaps_dir / f"{sid}.json"
 
@@ -272,17 +278,21 @@ class MainWindowSnapshotCrudSection:
             return
         snap = self.load_snapshot(sid)
         if not snap:
-            QtWidgets.QMessageBox.warning(self, tr("Error"), tr("Snapshot file missing"))
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                tr("Snapshot file missing"),
+            )
             return
         
         dlg = EditSnapshotDialog(
-            self,
+            self._parent_widget(self),
             snap,
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
             enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
         )
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         
         v = dlg.values()
@@ -358,7 +368,11 @@ class MainWindowSnapshotCrudSection:
                 LOGGER.error("Failed to rollback index file after update error.")
             if not save_json(self.settings_path, self.settings):
                 LOGGER.error("Failed to rollback settings file after update error.")
-            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to update snapshot: {sid}")
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                f"Failed to update snapshot: {sid}",
+            )
             return
 
         # Refresh UI
@@ -367,20 +381,20 @@ class MainWindowSnapshotCrudSection:
 
     def new_snapshot(self) -> None:
         dlg = SnapshotDialog(
-            self,
+            self._parent_widget(self),
             self.settings.get("default_root", str(Path.home())),
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
             enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
         )
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         v = dlg.values()
         self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
 
     def quick_snapshot(self) -> None:
         dlg = SnapshotDialog(
-            self,
+            self._parent_widget(self),
             self.settings.get("default_root", str(Path.home())),
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
@@ -388,7 +402,7 @@ class MainWindowSnapshotCrudSection:
         )
         dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
 
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         v = dlg.values()
         self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
@@ -418,12 +432,13 @@ class MainWindowSnapshotCrudSection:
                     continue
                 if it.get("title") == title and self._safe_path_equals(str(it.get("root", "")), root_path):
                     r = QtWidgets.QMessageBox.warning(
-                        self,
+                        self._parent_widget(self),
                         tr("Duplicate Snapshot"),
                         tr("Duplicate snapshot warn"),
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
                     )
-                    if r != QtWidgets.QMessageBox.Yes:
+                    if r != QtWidgets.QMessageBox.StandardButton.Yes:
                         return
                     break
         ws = workspace.strip()
@@ -455,6 +470,16 @@ class MainWindowSnapshotCrudSection:
         snapshot_todos = self._normalized_todos(todos) if capture_todos else ["", "", ""]
         process_keywords = self.settings.get("process_keywords", [])
         effective_git_state = git_state_data if git_state_data is not None else self._auto_git_state(root_path)
+        processes_data: List[Dict[str, Any]] = (
+            [dict(proc) for proc in list_processes_filtered(process_keywords)]
+            if capture_processes
+            else []
+        )
+        running_apps_data: List[Dict[str, Any]] = (
+            [dict(app) for app in list_running_apps()]
+            if capture_running_apps
+            else []
+        )
         snap = Snapshot(
             id=sid,
             title=title,
@@ -467,15 +492,19 @@ class MainWindowSnapshotCrudSection:
             pinned=False,
             archived=False,
             recent_files=recent_files,
-            processes=list_processes_filtered(process_keywords) if capture_processes else [],
-            running_apps=list_running_apps() if capture_running_apps else [],
+            processes=processes_data,
+            running_apps=running_apps_data,
             source=source,
             trigger=trigger,
             git_state=effective_git_state or {},
             auto_fingerprint=auto_fingerprint,
         )
         if not self.save_snapshot(snap):
-            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to save snapshot: {sid}")
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                f"Failed to save snapshot: {sid}",
+            )
             return
         if capture_recent and background_recent:
             self._start_recent_files_scan(sid, root_path)
@@ -528,7 +557,11 @@ class MainWindowSnapshotCrudSection:
                 log_exc("rollback snapshot meta file", rollback_exc)
             if not save_json(self.index_path, self.index):
                 LOGGER.error("Failed to rollback index file after meta update error.")
-            QtWidgets.QMessageBox.warning(self, tr("Error"), f"Failed to update snapshot metadata: {sid}")
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                f"Failed to update snapshot metadata: {sid}",
+            )
 
     def toggle_pin(self) -> None:
         sid = self.selected_id()
@@ -559,12 +592,13 @@ class MainWindowSnapshotCrudSection:
         if not sid:
             return
         r = QtWidgets.QMessageBox.question(
-            self,
+            self._parent_widget(self),
             tr("Delete snapshot?"),
             tr("Delete confirm msg"),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
         )
-        if r != QtWidgets.QMessageBox.Yes:
+        if r != QtWidgets.QMessageBox.StandardButton.Yes:
             return
         p = self.snap_path(sid)
         if p.exists():
@@ -573,7 +607,7 @@ class MainWindowSnapshotCrudSection:
             except Exception as e:
                 log_exc("delete snapshot file", e)
                 QtWidgets.QMessageBox.warning(
-                    self,
+                    self._parent_widget(self),
                     tr("Error"),
                     tr("Failed to delete snapshot file") + f": {e}"
                 )
@@ -581,7 +615,11 @@ class MainWindowSnapshotCrudSection:
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
         self.index = self.snapshot_service.touch_index(self.index)
         if not save_json(self.index_path, self.index):
-            QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to save index after delete.")
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                "Failed to save index after delete.",
+            )
             return
         self._reset_pagination_and_refresh()
         if self.list_model.rowCount() > 0:

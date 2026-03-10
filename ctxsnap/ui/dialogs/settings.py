@@ -25,9 +25,13 @@ def _make_scrollable(widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
     scroll = QtWidgets.QScrollArea()
     scroll.setWidget(widget)
     scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-    scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+    scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(
+        QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    scroll.setVerticalScrollBarPolicy(
+        QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
     return scroll
 
 
@@ -134,7 +138,9 @@ class SettingsDialog(QtWidgets.QDialog):
         restore_l.addWidget(self.preview_default)
 
         self.restore_profiles_list = QtWidgets.QListWidget()
-        self.restore_profiles_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.restore_profiles_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.restore_profiles_list.setMaximumHeight(120)
         self.rp_name = QtWidgets.QLineEdit()
         self.rp_name.setPlaceholderText(tr("Profile name"))
@@ -423,7 +429,9 @@ class SettingsDialog(QtWidgets.QDialog):
         # === Tags tab ===
         tags_content = QtWidgets.QWidget()
         self.tags_list = QtWidgets.QListWidget()
-        self.tags_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.tags_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
         for t in (settings.get("tags") or DEFAULT_TAGS):
             self.tags_list.addItem(t)
         self.tag_input = QtWidgets.QLineEdit()
@@ -462,7 +470,9 @@ class SettingsDialog(QtWidgets.QDialog):
         # === Templates tab ===
         templates_content = QtWidgets.QWidget()
         self.templates_list = QtWidgets.QListWidget()
-        self.templates_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.templates_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.templates_list.setMaximumHeight(150)
         self.template_name = QtWidgets.QLineEdit()
         self.template_name.setPlaceholderText(tr("Title placeholder"))
@@ -656,8 +666,14 @@ class SettingsDialog(QtWidgets.QDialog):
             msg.setWindowTitle(tr("Import Dialog Title"))
             msg.setText(tr("Import Params"))
             msg.setInformativeText(tr("Import Info"))
-            btn_apply = msg.addButton("✓ " + tr("Apply now"), QtWidgets.QMessageBox.AcceptRole)
-            btn_keep = msg.addButton(tr("Keep in dialog"), QtWidgets.QMessageBox.RejectRole)
+            btn_apply = msg.addButton(
+                "✓ " + tr("Apply now"),
+                QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+            )
+            btn_keep = msg.addButton(
+                tr("Keep in dialog"),
+                QtWidgets.QMessageBox.ButtonRole.RejectRole,
+            )
             msg.exec()
             self._import_apply_now = (msg.clickedButton() == btn_apply)
 

@@ -1,0 +1,18 @@
+{
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none",
+  "exclude": [
+    "**/__pycache__",
+    ".git",
+    ".pytest_cache",
+    "assets",
+    "backups"
+  ],
+  "include": [
+    "ctxsnap",
+    "ctxsnap_win.py",
+    "tests"
+  ]
+}

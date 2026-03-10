@@ -1,0 +1,13 @@
+# Normalize text files and keep Windows-friendly line endings in working tree
+* text=auto eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.pyd binary
+*.so binary
+*.zip binary

@@ -17,7 +17,9 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
         title.setObjectName("TitleLabel")
 
         self.listw = QtWidgets.QListWidget()
-        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.listw.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.detail = QtWidgets.QTextEdit()
         self.detail.setReadOnly(True)
         self.detail.setPlaceholderText(tr("Select a restore entry to view details."))
@@ -169,8 +171,10 @@ class CompareDialog(QtWidgets.QDialog):
             return
         left_meta = self._snaps[self.left_combo.currentIndex()]
         right_meta = self._snaps[self.right_combo.currentIndex()]
-        left = self._loader(left_meta.get("id")) or left_meta
-        right = self._loader(right_meta.get("id")) or right_meta
+        left_id = str(left_meta.get("id") or "")
+        right_id = str(right_meta.get("id") or "")
+        left = self._loader(left_id) or left_meta
+        right = self._loader(right_id) or right_meta
         left_lines = self._serialize(left)
         right_lines = self._serialize(right)
         diff = difflib.unified_diff(

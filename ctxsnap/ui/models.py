@@ -1,42 +1,68 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from PySide6 import QtCore, QtGui, QtWidgets
 
 
 class SnapshotItemDelegate(QtWidgets.QStyledItemDelegate):
     """HTML을 지원하는 QListView 커스텀 카드 델리게이트"""
-    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> None:
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+    ) -> None:
         options = QtWidgets.QStyleOptionViewItem(option)
         self.initStyleOption(options, index)
+        options_any = cast(Any, options)
 
         # 기본 배경 및 선택 효과 그리기 (CSS 스타일 유지)
-        style = options.widget.style() if options.widget else QtWidgets.QApplication.style()
-        options.text = ""  # 기본 텍스트 렌더링 방지
-        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, options, painter, options.widget)
+        style = (
+            options_any.widget.style()
+            if options_any.widget
+            else QtWidgets.QApplication.style()
+        )
+        options_any.text = ""  # 기본 텍스트 렌더링 방지
+        style.drawControl(
+            QtWidgets.QStyle.ControlElement.CE_ItemViewItem,
+            options,
+            painter,
+            options_any.widget,
+        )
 
         painter.save()
         
         # HTML 텍스트 문서 생성
         doc = QtGui.QTextDocument()
-        doc.setDefaultFont(options.font)
-        doc.setHtml(index.data(QtCore.Qt.DisplayRole))
-        doc.setTextWidth(options.rect.width())
+        doc.setDefaultFont(options_any.font)
+        doc.setHtml(str(index.data(QtCore.Qt.ItemDataRole.DisplayRole) or ""))
+        doc.setTextWidth(float(options_any.rect.width()))
         
         # 렌더링 위치 설정
-        painter.translate(options.rect.left(), options.rect.top())
-        clip = QtCore.QRectF(0, 0, options.rect.width(), options.rect.height())
+        painter.translate(options_any.rect.left(), options_any.rect.top())
+        clip = QtCore.QRectF(
+            0.0,
+            0.0,
+            float(options_any.rect.width()),
+            float(options_any.rect.height()),
+        )
         doc.drawContents(painter, clip)
         
         painter.restore()
 
-    def sizeHint(self, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> QtCore.QSize:
+    def sizeHint(
+        self,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+    ) -> QtCore.QSize:
         options = QtWidgets.QStyleOptionViewItem(option)
         self.initStyleOption(options, index)
+        options_any = cast(Any, options)
         
         doc = QtGui.QTextDocument()
-        doc.setDefaultFont(options.font)
-        doc.setHtml(index.data(QtCore.Qt.DisplayRole))
-        doc.setTextWidth(options.rect.width() if options.rect.width() > 0 else 300)
+        doc.setDefaultFont(options_any.font)
+        doc.setHtml(str(index.data(QtCore.Qt.ItemDataRole.DisplayRole) or ""))
+        rect_width = int(options_any.rect.width())
+        doc.setTextWidth(float(rect_width if rect_width > 0 else 300))
         
         return QtCore.QSize(int(doc.idealWidth()), int(doc.size().height()))
 
@@ -53,7 +79,10 @@ class SnapshotListModel(QtCore.QAbstractListModel):
         self._display_cache.clear()
         self.endResetModel()
 
-    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+    def rowCount(
+        self,
+        parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = QtCore.QModelIndex(),
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self._items)
@@ -66,7 +95,11 @@ class SnapshotListModel(QtCore.QAbstractListModel):
             return None
         return str(self._items[row].get("id") or "")
 
-    def data(self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole) -> Any:
+    def data(
+        self,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+        role: int = int(QtCore.Qt.ItemDataRole.DisplayRole),
+    ) -> Any:
         if not index.isValid():
             return None
         row = index.row()
@@ -75,7 +108,7 @@ class SnapshotListModel(QtCore.QAbstractListModel):
         
         item = self._items[row]
         sid = str(item.get("id") or "")
-        if role == QtCore.Qt.DisplayRole:
+        if role == int(QtCore.Qt.ItemDataRole.DisplayRole):
             cached = self._display_cache.get(sid)
             if cached is not None:
                 return cached
@@ -102,10 +135,10 @@ class SnapshotListModel(QtCore.QAbstractListModel):
             self._display_cache[sid] = html
             return html
             
-        if role == QtCore.Qt.UserRole:
+        if role == int(QtCore.Qt.ItemDataRole.UserRole):
             return sid
         
-        if role == QtCore.Qt.UserRole + 1:
+        if role == int(QtCore.Qt.ItemDataRole.UserRole) + 1:
             return item
             
         return None

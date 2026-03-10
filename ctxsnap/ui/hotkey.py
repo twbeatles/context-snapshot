@@ -23,7 +23,7 @@ class HotkeyFilter(QtCore.QObject, QtCore.QAbstractNativeEventFilter):
         try:
             if eventType != "windows_generic_MSG":
                 return False, 0
-            msg = ctypes.wintypes.MSG.from_address(int(message))
+            msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY and msg.wParam == self.hotkey_id:
                 self.hotkeyPressed.emit()
                 return True, 0

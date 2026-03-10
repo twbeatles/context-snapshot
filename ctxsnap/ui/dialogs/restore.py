@@ -77,14 +77,20 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         
         # Apps list (if any)
         self.apps_list = QtWidgets.QListWidget()
-        self.apps_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.apps_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
         self.apps_list.setMaximumHeight(120)
         for app in running_apps:
             label = f"  {app.get('name','')}  •  {app.get('exe','')}"
             item = QtWidgets.QListWidgetItem(label)
-            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-            item.setCheckState(QtCore.Qt.Checked if open_running_apps else QtCore.Qt.Unchecked)
-            item.setData(QtCore.Qt.UserRole, app)
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if open_running_apps
+                else QtCore.Qt.CheckState.Unchecked
+            )
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, app)
             self.apps_list.addItem(item)
 
         # Snapshot info display
@@ -152,8 +158,8 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         selected_apps = []
         for i in range(self.apps_list.count()):
             it = self.apps_list.item(i)
-            if it.checkState() == QtCore.Qt.Checked:
-                selected_apps.append(it.data(QtCore.Qt.UserRole))
+            if it.checkState() == QtCore.Qt.CheckState.Checked:
+                selected_apps.append(it.data(QtCore.Qt.ItemDataRole.UserRole))
         profile_name = ""
         if self.profile_combo is not None:
             profile_name = str(self.profile_combo.currentText() or "")
@@ -183,12 +189,14 @@ class ChecklistDialog(QtWidgets.QDialog):
         hint.setObjectName("HintLabel")
 
         self.listw = QtWidgets.QListWidget()
-        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.listw.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
         for i, t in enumerate(todos):
             if t:  # Skip empty todos
                 it = QtWidgets.QListWidgetItem(f"  {i+1}. {t}")
-                it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
-                it.setCheckState(QtCore.Qt.Unchecked)
+                it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+                it.setCheckState(QtCore.Qt.CheckState.Unchecked)
                 self.listw.addItem(it)
 
         btn_ok = QtWidgets.QPushButton("✓ " + tr("Done"))

@@ -1,9 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# pyright: reportAttributeAccessIssue=false
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from ctxsnap.app_storage import save_json
 from ctxsnap.constants import DEFAULT_TAGS
@@ -16,15 +18,17 @@ LOGGER = get_logger()
 
 class MainWindowListViewSection:
     def _build_tag_menu(self) -> None:
-        menu = QtWidgets.QMenu(self)
-        clear_action = QtGui.QAction("All tags", self)
+        parent_widget = cast(QtWidgets.QWidget, self)
+        parent_obj = cast(QtCore.QObject, self)
+        menu = QtWidgets.QMenu(parent_widget)
+        clear_action = QtGui.QAction("All tags", parent_obj)
         clear_action.triggered.connect(self._clear_tag_filter)
         menu.addAction(clear_action)
         menu.addSeparator()
         tags = self.settings.get("tags", DEFAULT_TAGS)
         self.selected_tags.intersection_update(tags)
         for tag in tags:
-            action = QtGui.QAction(tag, self)
+            action = QtGui.QAction(tag, parent_obj)
             action.setCheckable(True)
             action.setChecked(tag in self.selected_tags)
             action.triggered.connect(self._toggle_tag_filter)

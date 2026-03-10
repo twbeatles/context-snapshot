@@ -22,6 +22,12 @@ hiddenimports = [
     'ctxsnap.ui.main_window_sections.snapshot_crud',
     'ctxsnap.ui.main_window_sections.settings_backup',
     'ctxsnap.ui.main_window_sections.restore_actions',
+    'ctxsnap.ui.dialogs',
+    'ctxsnap.ui.dialogs.snapshot',
+    'ctxsnap.ui.dialogs.restore',
+    'ctxsnap.ui.dialogs.settings',
+    'ctxsnap.ui.dialogs.history',
+    'ctxsnap.ui.dialogs.onboarding',
 ]
 
 a = Analysis(

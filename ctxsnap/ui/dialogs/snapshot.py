@@ -43,12 +43,14 @@ class SnapshotDialog(QtWidgets.QDialog):
         self.note_edit.setMaximumHeight(80)
 
         self.tags_list = QtWidgets.QListWidget()
-        self.tags_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.tags_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
         self.tags_list.setMaximumHeight(80)
         for t in available_tags:
             it = QtWidgets.QListWidgetItem(t)
-            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
-            it.setCheckState(QtCore.Qt.Unchecked)
+            it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.CheckState.Unchecked)
             self.tags_list.addItem(it)
 
         self.custom_tag = QtWidgets.QLineEdit()
@@ -159,8 +161,8 @@ class SnapshotDialog(QtWidgets.QDialog):
                 self.custom_tag.clear()
                 return
         it = QtWidgets.QListWidgetItem(t)
-        it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
-        it.setCheckState(QtCore.Qt.Checked)
+        it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+        it.setCheckState(QtCore.Qt.CheckState.Checked)
         self.tags_list.addItem(it)
         self.custom_tag.clear()
 
@@ -203,7 +205,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         tags: List[str] = []
         for i in range(self.tags_list.count()):
             it = self.tags_list.item(i)
-            if it.checkState() == QtCore.Qt.Checked:
+            if it.checkState() == QtCore.Qt.CheckState.Checked:
                 tags.append(it.text())
         if not title:
             # fallback suggestion logic if empty
@@ -229,7 +231,11 @@ class SnapshotDialog(QtWidgets.QDialog):
             self.todo3.setText(str(todos[2]))
         for i in range(self.tags_list.count()):
             it = self.tags_list.item(i)
-            it.setCheckState(QtCore.Qt.Checked if it.text() in tags else QtCore.Qt.Unchecked)
+            it.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if it.text() in tags
+                else QtCore.Qt.CheckState.Unchecked
+            )
 
 
 class EditSnapshotDialog(SnapshotDialog):
@@ -271,14 +277,14 @@ class EditSnapshotDialog(SnapshotDialog):
         for i in range(self.tags_list.count()):
             it = self.tags_list.item(i)
             if it.text() in existing_tags:
-                it.setCheckState(QtCore.Qt.Checked)
+                it.setCheckState(QtCore.Qt.CheckState.Checked)
                 existing_tags.discard(it.text())
         
         # Add any tags that weren't in the available list
         for tag in existing_tags:
             it = QtWidgets.QListWidgetItem(tag)
-            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
-            it.setCheckState(QtCore.Qt.Checked)
+            it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.CheckState.Checked)
             self.tags_list.addItem(it)
     
     def snapshot_id(self) -> str:

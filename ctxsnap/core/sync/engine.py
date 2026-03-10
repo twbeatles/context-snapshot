@@ -35,15 +35,18 @@ class SyncEngine:
 
     @staticmethod
     def _entry_from_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
+        tags = snap.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
         return {
             "id": snap.get("id", ""),
             "title": snap.get("title", ""),
             "created_at": snap.get("created_at", ""),
             "updated_at": snap.get("updated_at", snap.get("created_at", "")),
-            "rev": int(snap.get("rev", 1) or 1),
+            "rev": SyncEngine._to_int(snap.get("rev", 1), 1),
             "root": snap.get("root", ""),
             "vscode_workspace": snap.get("vscode_workspace", ""),
-            "tags": snap.get("tags", []),
+            "tags": tags,
             "pinned": bool(snap.get("pinned", False)),
             "archived": bool(snap.get("archived", False)),
             "search_blob": build_search_blob(snap),
@@ -53,6 +56,13 @@ class SyncEngine:
             "git_state": snap.get("git_state", {}),
             "auto_fingerprint": snap.get("auto_fingerprint", ""),
         }
+
+    @staticmethod
+    def _to_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def _hash_snapshot(snap: Dict[str, Any]) -> str:
@@ -169,10 +179,13 @@ class SyncEngine:
         for sid, snap in merged.items():
             save_snapshot_file(self.local_snaps_dir / f"{sid}.json", snap)
 
-        merged_index = copy.deepcopy(local_index if isinstance(local_index, dict) else {"snapshots": []})
-        merged_index["schema_version"] = max(2, int(merged_index.get("schema_version", 1) or 1))
+        local_index_map = local_index if isinstance(local_index, dict) else {}
+        merged_index: Dict[str, Any] = copy.deepcopy(local_index_map)
+        if not isinstance(merged_index.get("snapshots"), list):
+            merged_index["snapshots"] = []
+        merged_index["schema_version"] = max(2, self._to_int(merged_index.get("schema_version", 1), 1))
         merged_index["updated_at"] = now_iso()
-        merged_index["rev"] = int(merged_index.get("rev", 1) or 1) + 1
+        merged_index["rev"] = self._to_int(merged_index.get("rev", 1), 1) + 1
         merged_index["search_meta"] = merged_index.get("search_meta") if isinstance(merged_index.get("search_meta"), dict) else {"engine": "blob", "version": 1}
         merged_index["snapshots"] = [self._entry_from_snapshot(s) for _, s in sorted(merged.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)]
         save_json(self.local_index_path, merged_index)

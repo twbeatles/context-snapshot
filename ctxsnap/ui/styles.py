@@ -5,6 +5,8 @@ and smooth micro-animations.
 """
 from PySide6 import QtCore, QtGui, QtWidgets
 
+_WHEEL_FILTERS: dict[int, QtCore.QObject] = {}
+
 
 # ============================================================
 # Scroll-Safe Widgets (prevent accidental value changes on scroll)
@@ -13,8 +15,13 @@ class NoScrollMixin:
     """Mixin to prevent wheel events from changing values unless focused."""
     
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
+        widget = self if isinstance(self, QtWidgets.QWidget) else None
+        if widget is not None and widget.hasFocus():
+            super_widget = super()
+            casted = super_widget if isinstance(super_widget, object) else None
+            if casted is not None:
+                # Delegate to the underlying widget implementation.
+                getattr(casted, "wheelEvent")(event)
         else:
             event.ignore()
 
@@ -41,16 +48,19 @@ def disable_wheel_scroll(widget: QtWidgets.QWidget) -> None:
     """
     class WheelFilter(QtCore.QObject):
         def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-            if event.type() == QtCore.QEvent.Wheel:
-                if not obj.hasFocus():
+            if event.type() == QtCore.QEvent.Type.Wheel:
+                if isinstance(obj, QtWidgets.QWidget) and not obj.hasFocus():
                     event.ignore()
                     return True
             return False
     
-    # Store the filter on the widget to prevent garbage collection
-    widget._wheel_filter = WheelFilter(widget)
-    widget.installEventFilter(widget._wheel_filter)
-    widget.setFocusPolicy(QtCore.Qt.StrongFocus)
+    # Hold a strong reference to the filter to prevent garbage collection.
+    wheel_filter = WheelFilter(widget)
+    widget_id = id(widget)
+    _WHEEL_FILTERS[widget_id] = wheel_filter
+    widget.destroyed.connect(lambda _=None, wid=widget_id: _WHEEL_FILTERS.pop(wid, None))
+    widget.installEventFilter(wheel_filter)
+    widget.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
 # ============================================================
 # Design Tokens
@@ -596,35 +606,43 @@ def set_pretty_style(app: QtWidgets.QApplication) -> None:
     palette = QtGui.QPalette()
     
     # Window colors
-    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(15, 15, 20))
-    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(240, 240, 245))
+    palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(15, 15, 20))
+    palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(240, 240, 245))
     
     # Base colors (for input fields, lists)
-    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(26, 26, 36))
-    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(36, 36, 58))
+    palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(26, 26, 36))
+    palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(36, 36, 58))
     
     # Text colors
-    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(240, 240, 245))
-    palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(96, 96, 120))
+    palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(240, 240, 245))
+    palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor(96, 96, 120))
     
     # Button colors
-    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(36, 36, 58))
-    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(240, 240, 245))
+    palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(36, 36, 58))
+    palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor(240, 240, 245))
     
     # Highlight colors (selection)
-    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(124, 92, 255))
-    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(124, 92, 255))
+    palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(255, 255, 255))
     
     # Tooltip colors
-    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(36, 36, 58))
-    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(240, 240, 245))
+    palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, QtGui.QColor(36, 36, 58))
+    palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, QtGui.QColor(240, 240, 245))
     
     # Link color
-    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(124, 92, 255))
-    palette.setColor(QtGui.QPalette.LinkVisited, QtGui.QColor(167, 139, 250))
+    palette.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor(124, 92, 255))
+    palette.setColor(QtGui.QPalette.ColorRole.LinkVisited, QtGui.QColor(167, 139, 250))
     
     # Disabled colors
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(96, 96, 120))
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(96, 96, 120))
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled,
+        QtGui.QPalette.ColorRole.Text,
+        QtGui.QColor(96, 96, 120),
+    )
+    palette.setColor(
+        QtGui.QPalette.ColorGroup.Disabled,
+        QtGui.QPalette.ColorRole.ButtonText,
+        QtGui.QColor(96, 96, 120),
+    )
     
     app.setPalette(palette)

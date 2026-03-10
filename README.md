@@ -424,6 +424,15 @@ python ctxsnap_win.py
 pytest -q
 ```
 
+### 정적 타입 검사 (Pylance/pyright)
+
+```bash
+pyright
+```
+
+- 저장소 루트 `pyrightconfig.json` 기준으로 검사합니다.
+- CI에서도 `pyright` + `pytest`를 함께 실행합니다.
+
 ### EXE 빌드 (PyInstaller)
 
 ```bash
@@ -460,7 +469,10 @@ python -m PyInstaller ctxsnap_win.spec
 | `ctxsnap/utils.py` | 유틸리티 함수 |
 | `assets/` | 아이콘/이미지 |
 | `tests/` | pytest 기반 자동 테스트 |
-| `.github/workflows/ci.yml` | Windows CI 테스트 파이프라인 |
+| `.github/workflows/ci.yml` | Windows CI 파이프라인 (`pyright`, `pytest`) |
+| `pyrightconfig.json` | Pylance/pyright 공통 타입 검사 설정 |
+| `.editorconfig` | UTF-8 + CRLF + 기본 포맷 가드 |
+| `.gitattributes` | 텍스트 EOL 정규화 정책 |
 | `installer/` | Inno Setup 스크립트 |
 
 ---

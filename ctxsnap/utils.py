@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import psutil
 from PySide6 import QtWidgets
@@ -21,10 +21,42 @@ from ctxsnap.i18n import tr
 LOGGER = logging.getLogger(APP_NAME)
 
 
+class ProcessInfo(TypedDict):
+    pid: int
+    name: str
+    exe: str
+    cmdline: List[str]
+
+
+class RunningAppInfo(TypedDict):
+    pid: int
+    name: str
+    exe: str
+    title: str
+    cmdline: List[str]
+
+
+def _to_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_str_list(value: object, *, max_items: Optional[int] = None) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out = [str(item) for item in value if str(item).strip()]
+    if max_items is None:
+        return out
+    return out[:max_items]
+
+
 def resource_path(relative_path: str) -> Path:
     """Get absolute path to resource, works for dev and for PyInstaller"""
-    if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS) / relative_path
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(str(meipass)) / relative_path
     return Path(__file__).parent.parent / relative_path
 
 
@@ -145,25 +177,29 @@ def recent_files_under(
     return [str(p.resolve()) for _, p in files[:limit]]
 
 
-def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[ProcessInfo]:
     kws = keywords or DEFAULT_PROCESS_KEYWORDS
-    out: List[Dict[str, str]] = []
+    out: List[ProcessInfo] = []
     for proc in psutil.process_iter(attrs=["pid", "name", "exe", "cmdline"]):
         try:
             name = (proc.info.get("name") or "").lower()
             exe = (proc.info.get("exe") or "").lower()
             hay = f"{name} {exe}"
             if any(k in hay for k in kws):
+                pid = _to_int(proc.info.get("pid"), 0)
+                raw_name = str(proc.info.get("name") or "")
+                raw_exe = str(proc.info.get("exe") or "")
+                cmdline = _to_str_list(proc.info.get("cmdline"), max_items=6)
                 out.append({
-                    "pid": proc.info.get("pid"),
-                    "name": proc.info.get("name"),
-                    "exe": proc.info.get("exe") or "",
-                    "cmdline": (proc.info.get("cmdline") or [])[:6],
+                    "pid": pid,
+                    "name": raw_name,
+                    "exe": raw_exe,
+                    "cmdline": cmdline,
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    seen = set()
-    uniq = []
+    seen: set[Tuple[str, str]] = set()
+    uniq: List[ProcessInfo] = []
     for p in out:
         key = (p.get("name") or "", p.get("exe") or "")
         if key in seen:
@@ -173,14 +209,14 @@ def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Dict[s
     return uniq
 
 
-def list_running_apps() -> List[Dict[str, object]]:
+def list_running_apps() -> List[RunningAppInfo]:
     user32 = ctypes.windll.user32
     get_window_text_length = user32.GetWindowTextLengthW
     get_window_text = user32.GetWindowTextW
     is_window_visible = user32.IsWindowVisible
     get_window_thread_process_id = user32.GetWindowThreadProcessId
 
-    results: List[Dict[str, object]] = []
+    results: List[RunningAppInfo] = []
     seen: set[Tuple[str, str]] = set()
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
@@ -212,11 +248,11 @@ def list_running_apps() -> List[Dict[str, object]]:
         seen.add(key)
         results.append(
             {
-                "pid": pid.value,
-                "name": name,
-                "exe": exe,
+                "pid": int(pid.value),
+                "name": str(name or ""),
+                "exe": str(exe or ""),
                 "title": title,
-                "cmdline": cmdline[:10] if cmdline else [],
+                "cmdline": [str(part) for part in (cmdline[:10] if cmdline else [])],
             }
         )
         return True
@@ -239,12 +275,12 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
             continue
     for app in apps:
         exe = str(app.get("exe") or "").strip()
-        cmdline = app.get("cmdline") or []
+        cmdline = _to_str_list(app.get("cmdline"))
         exe_lower = exe.lower() if exe else ""
         if exe_lower and exe_lower in running:
             continue
         try:
-            launch_cmd = []
+            launch_cmd: List[str] = []
             if cmdline:
                 launch_cmd = cmdline
             elif exe:
@@ -273,11 +309,22 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
 def build_search_blob(snap: Dict[str, object]) -> str:
     parts: List[str] = []
     parts.append(str(snap.get("note", "") or ""))
-    parts.extend([str(p) for p in snap.get("todos", [])])
-    parts.extend([str(p) for p in snap.get("recent_files", [])])
-    parts.extend([str(p.get("name", "")) for p in snap.get("processes", [])])
-    parts.extend([str(p.get("exe", "")) for p in snap.get("processes", [])])
-    parts.extend([str(p.get("name", "")) for p in snap.get("running_apps", [])])
+    parts.extend(_to_str_list(snap.get("todos")))
+    parts.extend(_to_str_list(snap.get("recent_files")))
+
+    processes = snap.get("processes")
+    if isinstance(processes, list):
+        for proc in processes:
+            if isinstance(proc, dict):
+                parts.append(str(proc.get("name", "")))
+                parts.append(str(proc.get("exe", "")))
+
+    running_apps = snap.get("running_apps")
+    if isinstance(running_apps, list):
+        for app in running_apps:
+            if isinstance(app, dict):
+                parts.append(str(app.get("name", "")))
+
     return " ".join(p for p in parts if p).lower()
 
 

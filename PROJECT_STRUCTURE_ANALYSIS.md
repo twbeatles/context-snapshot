@@ -1,6 +1,6 @@
 # CtxSnap 프로젝트 구조 정합성 분석 (업데이트)
 
-- 작성일: 2026-02-27
+- 작성일: 2026-03-10
 - 기준 코드: `main` 워크트리 최신 상태
 - 참조 문서: `README.md`, `README.en.md`, `CLAUDE.md`, `gpt.md`
 
@@ -14,6 +14,7 @@
 - DPAPI 보안 계층 도입: `ctxsnap/core/security.py`
 - 검색 고도화: 필드 쿼리(`tag:`, `root:`, `todo:`)
 - 테스트/CI 도입: `tests/*`, `.github/workflows/ci.yml`
+- 정적 타입 검사 기준선 도입: `pyrightconfig.json`, `.editorconfig`, `.gitattributes`
 - 레거시 `ctxsnap/storage.py` 제거
 
 즉, 초기 분석 문서의 P0/P1/P2 핵심 방향이 코드에 대부분 반영되었습니다.
@@ -131,12 +132,12 @@ DPAPI envelope 포맷:
 
 ### 5.2 빌드 스펙 ↔ 코드
 
-- `ctxsnap_win.spec`는 동작 가능하나, 모듈 분할 이후 hiddenimports를 명시하면 빌드 안정성 향상 여지 있음(이번 반영)
+- `ctxsnap_win.spec`에 section/dialogs 모듈 hiddenimports가 명시되어 분할 구조에서 빌드 결정성이 개선됨
 
 ### 5.3 테스트/CI
 
 - `pytest` 테스트 세트 존재
-- GitHub Actions CI에서 Windows 환경 테스트 실행
+- GitHub Actions CI에서 Windows 환경 `pyright` + `pytest` 실행
 
 ## 6. 남은 개선 여지
 

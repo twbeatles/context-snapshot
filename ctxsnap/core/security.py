@@ -23,8 +23,8 @@ class SecurityService:
     ENVELOPE_VERSION = 1
 
     def __init__(self) -> None:
-        self._crypt32 = None
-        self._kernel32 = None
+        self._crypt32: Any | None = None
+        self._kernel32: Any | None = None
         if hasattr(ctypes, "windll"):
             try:
                 self._crypt32 = ctypes.windll.crypt32
@@ -48,11 +48,13 @@ class SecurityService:
         return _DataBlob(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_byte))), buf
 
     def _protect(self, raw: bytes) -> bytes:
-        if not self.is_available():
+        crypt32 = self._crypt32
+        kernel32 = self._kernel32
+        if crypt32 is None or kernel32 is None:
             raise RuntimeError("DPAPI unavailable")
         in_blob, in_buf = self._make_blob(raw)
         out_blob = _DataBlob()
-        ok = self._crypt32.CryptProtectData(
+        ok = crypt32.CryptProtectData(
             ctypes.byref(in_blob),
             None,
             None,
@@ -67,14 +69,16 @@ class SecurityService:
         try:
             return ctypes.string_at(out_blob.pbData, out_blob.cbData)
         finally:
-            self._kernel32.LocalFree(out_blob.pbData)
+            kernel32.LocalFree(out_blob.pbData)
 
     def _unprotect(self, raw: bytes) -> bytes:
-        if not self.is_available():
+        crypt32 = self._crypt32
+        kernel32 = self._kernel32
+        if crypt32 is None or kernel32 is None:
             raise RuntimeError("DPAPI unavailable")
         in_blob, in_buf = self._make_blob(raw)
         out_blob = _DataBlob()
-        ok = self._crypt32.CryptUnprotectData(
+        ok = crypt32.CryptUnprotectData(
             ctypes.byref(in_blob),
             None,
             None,
@@ -89,7 +93,7 @@ class SecurityService:
         try:
             return ctypes.string_at(out_blob.pbData, out_blob.cbData)
         finally:
-            self._kernel32.LocalFree(out_blob.pbData)
+            kernel32.LocalFree(out_blob.pbData)
 
     def encrypt_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=self._json_default).encode("utf-8")

@@ -1,9 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# pyright: reportAttributeAccessIssue=false
 
 import copy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from PySide6 import QtWidgets
 
@@ -18,6 +20,10 @@ LOGGER = get_logger()
 
 
 class MainWindowSettingsBackupSection:
+    @staticmethod
+    def _parent_widget(instance: object) -> QtWidgets.QWidget:
+        return cast(QtWidgets.QWidget, instance)
+
     def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> bool:
         """Apply settings immediately (UI + hotkey)."""
         vals = migrate_settings(vals)
@@ -28,7 +34,11 @@ class MainWindowSettingsBackupSection:
         if save:
             if not save_json(self.settings_path, self.settings):
                 log_exc("save settings", RuntimeError("save_json returned False"))
-                QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to save settings.")
+                QtWidgets.QMessageBox.warning(
+                    self._parent_widget(self),
+                    tr("Error"),
+                    "Failed to save settings.",
+                )
                 return False
 
         self._build_tag_menu()
@@ -78,7 +88,7 @@ class MainWindowSettingsBackupSection:
                 safety_backup = self._auto_backup_current()
                 self.statusBar().showMessage(f"Safety backup created: {safety_backup.name}", 3500)
 
-                msg = QtWidgets.QMessageBox(self)
+                msg = QtWidgets.QMessageBox(self._parent_widget(self))
                 msg.setWindowTitle(tr("Import snapshots"))
                 msg.setText(tr("Import snapshots strategy"))
                 msg.setInformativeText(
@@ -88,10 +98,22 @@ class MainWindowSettingsBackupSection:
                     + "\n"
                     + tr("Replace strategy")
                 )
-                btn_merge = msg.addButton("Merge", QtWidgets.QMessageBox.AcceptRole)
-                btn_overwrite = msg.addButton("Overwrite", QtWidgets.QMessageBox.DestructiveRole)
-                btn_replace = msg.addButton("Replace all", QtWidgets.QMessageBox.DestructiveRole)
-                btn_cancel = msg.addButton(tr("Cancel"), QtWidgets.QMessageBox.RejectRole)
+                btn_merge = msg.addButton(
+                    "Merge",
+                    QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+                )
+                btn_overwrite = msg.addButton(
+                    "Overwrite",
+                    QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
+                )
+                btn_replace = msg.addButton(
+                    "Replace all",
+                    QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
+                )
+                btn_cancel = msg.addButton(
+                    tr("Cancel"),
+                    QtWidgets.QMessageBox.ButtonRole.RejectRole,
+                )
                 msg.exec()
                 clicked = msg.clickedButton()
                 if clicked == btn_cancel:
@@ -196,14 +218,23 @@ class MainWindowSettingsBackupSection:
             msg = "Import failed. Changes were rolled back."
             if safety_backup:
                 msg += f"\nSafety backup: {safety_backup}"
-            QtWidgets.QMessageBox.warning(self, tr("Error"), msg)
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                msg,
+            )
             return False
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self, self.settings, index_path=self.index_path, snaps_dir=self.snaps_dir)
+        dlg = SettingsDialog(
+            self._parent_widget(self),
+            self.settings,
+            index_path=self.index_path,
+            snaps_dir=self.snaps_dir,
+        )
         dlg.settingsImported.connect(self.apply_imported_backup)
         dlg.syncRequested.connect(self._run_scheduled_sync)
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 
         vals = dlg.values()

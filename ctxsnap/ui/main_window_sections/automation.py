@@ -1,9 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# pyright: reportAttributeAccessIssue=false
 
 import copy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, cast
 
 from PySide6 import QtCore
 
@@ -237,7 +239,7 @@ class MainWindowAutomationSection:
             scan_limit=int(self.settings.get("recent_files_scan_limit", 20000)),
             scan_seconds=float(self.settings.get("recent_files_scan_seconds", 2.0)),
         )
-        thread = QtCore.QThread(self)
+        thread = QtCore.QThread(cast(QtCore.QObject, self))
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_recent_files_ready)

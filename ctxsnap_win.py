@@ -64,7 +64,11 @@ def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSyste
     tray.setContextMenu(menu)
     # keep references for live updates
     tray.act_quick = act_quick  # type: ignore[attr-defined]
-    tray.activated.connect(lambda reason: toggle_show() if reason == QtWidgets.QSystemTrayIcon.Trigger else None)
+    tray.activated.connect(
+        lambda reason: toggle_show()
+        if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger
+        else None
+    )
     tray.show()
     return tray
 
@@ -84,7 +88,9 @@ def main() -> None:
     if icon_path.exists():
         app.setWindowIcon(QtGui.QIcon(str(icon_path)))
     else:
-        app.setWindowIcon(app.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
+        app.setWindowIcon(
+            app.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
+        )
 
     _, _, settings_path = ensure_storage()
     settings = migrate_settings(load_json(settings_path))
@@ -114,7 +120,11 @@ def main() -> None:
     hotkey_id = 0xC7A5
     hotkey_filter = HotkeyFilter(hotkey_id)
 
-    QtCore.QCoreApplication.instance().installNativeEventFilter(hotkey_filter)
+    app_instance = QtCore.QCoreApplication.instance()
+    if app_instance is None:
+        LOGGER.warning("QCoreApplication instance is unavailable for native event filter.")
+    else:
+        app_instance.installNativeEventFilter(hotkey_filter)
     hotkey_filter.hotkeyPressed.connect(win.quick_snapshot)
 
     def apply_hotkey_from_settings():
@@ -142,9 +152,18 @@ def main() -> None:
                 dlg.setWindowTitle(tr("Hotkey conflict"))
                 dlg.setText(tr("Hotkey conflict msg"))
                 dlg.setInformativeText(tr("Hotkey conflict info"))
-                btn_try = dlg.addButton(tr("Try alternatives"), QtWidgets.QMessageBox.AcceptRole)
-                btn_disable = dlg.addButton(tr("Disable hotkey"), QtWidgets.QMessageBox.DestructiveRole)
-                dlg.addButton(tr("Keep as is"), QtWidgets.QMessageBox.RejectRole)
+                btn_try = dlg.addButton(
+                    tr("Try alternatives"),
+                    QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+                )
+                btn_disable = dlg.addButton(
+                    tr("Disable hotkey"),
+                    QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
+                )
+                dlg.addButton(
+                    tr("Keep as is"),
+                    QtWidgets.QMessageBox.ButtonRole.RejectRole,
+                )
                 dlg.exec()
                 if dlg.clickedButton() == btn_try:
                     candidates = [

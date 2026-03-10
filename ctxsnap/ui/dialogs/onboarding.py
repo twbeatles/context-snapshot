@@ -20,16 +20,16 @@ class OnboardingDialog(QtWidgets.QDialog):
         # Header section
         header = QtWidgets.QLabel("🚀 " + tr("Welcome to CtxSnap"))
         header.setObjectName("TitleLabel")
-        header.setAlignment(QtCore.Qt.AlignCenter)
+        header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         
         sub = QtWidgets.QLabel(tr("Onboarding header"))
         sub.setObjectName("HintLabel")
-        sub.setAlignment(QtCore.Qt.AlignCenter)
+        sub.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         # Progress indicator
         self.progress_label = QtWidgets.QLabel("")
         self.progress_label.setObjectName("SubtitleLabel")
-        self.progress_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.progress_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         self.stack = QtWidgets.QStackedWidget()
         self.pages: List[QtWidgets.QWidget] = []
@@ -73,7 +73,7 @@ class OnboardingDialog(QtWidgets.QDialog):
         title_text = f"{icon} {title}" if icon else title
         t = QtWidgets.QLabel(title_text)
         t.setObjectName("SubtitleLabel")
-        t.setAlignment(QtCore.Qt.AlignCenter)
+        t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         
         b = QtWidgets.QTextBrowser()
         b.setOpenExternalLinks(False)

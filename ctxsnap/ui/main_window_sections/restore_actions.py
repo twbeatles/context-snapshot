@@ -1,9 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+# pyright: reportAttributeAccessIssue=false
 
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 from PySide6 import QtWidgets
 
@@ -16,6 +18,10 @@ from ctxsnap.utils import restore_running_apps, safe_parse_datetime
 
 
 class MainWindowRestoreActionsSection:
+    @staticmethod
+    def _parent_widget(instance: object) -> QtWidgets.QWidget:
+        return cast(QtWidgets.QWidget, instance)
+
     def open_selected_root(self) -> None:
         sid = self.selected_id()
         if not sid:
@@ -35,7 +41,11 @@ class MainWindowRestoreActionsSection:
         target = resolve_vscode_target(snap)
         success, msg = open_vscode_at(target)
         if not success:
-            QtWidgets.QMessageBox.information(self, tr("VSCode not found title"), msg or tr("VSCode command missing"))
+            QtWidgets.QMessageBox.information(
+                self._parent_widget(self),
+                tr("VSCode not found title"),
+                msg or tr("VSCode command missing"),
+            )
 
     def export_selected_snapshot(self) -> None:
         sid = self.selected_id()
@@ -46,18 +56,28 @@ class MainWindowRestoreActionsSection:
             return
         default_name = f"snapshot_{sid}.json"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export snapshot", str(Path.home() / default_name), "JSON files (*.json)"
+            self._parent_widget(self),
+            "Export snapshot",
+            str(Path.home() / default_name),
+            "JSON files (*.json)",
         )
         if not path:
             return
         if save_snapshot_file(Path(path), snap):
             self.statusBar().showMessage("Snapshot exported.", 2500)
         else:
-            QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to export snapshot.")
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                "Failed to export snapshot.",
+            )
 
     def export_weekly_report(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export weekly report", str(Path.home() / "ctxsnap_weekly_report.md"), "Markdown files (*.md)"
+            self._parent_widget(self),
+            "Export weekly report",
+            str(Path.home() / "ctxsnap_weekly_report.md"),
+            "Markdown files (*.md)",
         )
         if not path:
             return
@@ -91,21 +111,29 @@ class MainWindowRestoreActionsSection:
     def open_compare_dialog(self) -> None:
         snapshots = [s for s in self.index.get("snapshots", []) if s.get("id")]
         if len(snapshots) < 2:
-            QtWidgets.QMessageBox.information(self, tr("Compare"), tr("Need at least two snapshots to compare"))
+            QtWidgets.QMessageBox.information(
+                self._parent_widget(self),
+                tr("Compare"),
+                tr("Need at least two snapshots to compare"),
+            )
             return
-        dlg = CompareDialog(self, snapshots, loader=self.load_snapshot)
+        dlg = CompareDialog(self._parent_widget(self), snapshots, loader=self.load_snapshot)
         dlg.exec()
 
     def open_restore_history(self) -> None:
         history_path = app_dir() / "restore_history.json"
         if not history_path.exists():
-            QtWidgets.QMessageBox.information(self, tr("Restore History"), tr("No restore history yet"))
+            QtWidgets.QMessageBox.information(
+                self._parent_widget(self),
+                tr("Restore History"),
+                tr("No restore history yet"),
+            )
             return
         try:
             history = json.loads(history_path.read_text(encoding="utf-8"))
         except Exception:
             history = {"restores": []}
-        dlg = RestoreHistoryDialog(self, history)
+        dlg = RestoreHistoryDialog(self._parent_widget(self), history)
         dlg.exec()
 
     def restore_last(self) -> None:
@@ -126,7 +154,11 @@ class MainWindowRestoreActionsSection:
     def _restore_by_id(self, sid: str) -> None:
         snap = self.load_snapshot(sid)
         if not snap:
-            QtWidgets.QMessageBox.warning(self, tr("Error"), tr("Snapshot file missing"))
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                tr("Snapshot file missing"),
+            )
             return
 
         restore_defaults = self.restore_service.default_restore_options(self.settings)
@@ -142,7 +174,7 @@ class MainWindowRestoreActionsSection:
 
         if preview_default:
             dlg = RestorePreviewDialog(
-                self,
+                self._parent_widget(self),
                 snap,
                 open_folder_default,
                 open_terminal_default,
@@ -151,7 +183,7 @@ class MainWindowRestoreActionsSection:
                 profiles=profiles,
                 selected_profile=profile_default,
             )
-            if dlg.exec() != QtWidgets.QDialog.Accepted:
+            if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
                 return
             ch = dlg.choices()
             if ch.get("profile_name"):
@@ -194,7 +226,10 @@ class MainWindowRestoreActionsSection:
         requested_apps = []
         if ch.get("open_running_apps"):
             requested_apps = ch.get("running_apps") or snap.get("running_apps", [])
-            running_app_failures = restore_running_apps(requested_apps, parent=self)
+            running_app_failures = restore_running_apps(
+                requested_apps,
+                parent=self._parent_widget(self),
+            )
         else:
             running_app_failures = []
 
@@ -217,7 +252,7 @@ class MainWindowRestoreActionsSection:
 
         if errors:
             QtWidgets.QMessageBox.warning(
-                self,
+                self._parent_widget(self),
                 tr("Restore"),
                 tr("Restore failed for some items:") + "\n" + "\n".join(errors),
             )
@@ -225,6 +260,6 @@ class MainWindowRestoreActionsSection:
         if show_checklist:
             todos = snap.get("todos", [])
             if any(todos):
-                dlg = ChecklistDialog(self, [t for t in todos if t])
+                dlg = ChecklistDialog(self._parent_widget(self), [t for t in todos if t])
                 dlg.exec()
         self.statusBar().showMessage("Restore triggered.", 2500)

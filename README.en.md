@@ -421,6 +421,15 @@ python ctxsnap_win.py
 pytest -q
 ```
 
+### Static Type Check (Pylance/pyright)
+
+```bash
+pyright
+```
+
+- Uses the repository-root `pyrightconfig.json`.
+- CI runs both `pyright` and `pytest`.
+
 ### Build EXE (PyInstaller)
 
 ```bash
@@ -454,7 +463,10 @@ python -m PyInstaller ctxsnap_win.spec
 | `ctxsnap/utils.py` | Utility functions |
 | `assets/` | Icons/images |
 | `tests/` | pytest-based automated tests |
-| `.github/workflows/ci.yml` | Windows CI pipeline |
+| `.github/workflows/ci.yml` | Windows CI pipeline (`pyright`, `pytest`) |
+| `pyrightconfig.json` | Shared Pylance/pyright type-check config |
+| `.editorconfig` | UTF-8 + CRLF + formatting guardrails |
+| `.gitattributes` | Text EOL normalization policy |
 | `installer/` | Inno Setup scripts |
 
 ---

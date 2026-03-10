@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -237,7 +237,9 @@ class MainWindow(
         self.selected_tags: Set[str] = set()
         self.tag_filter_btn = QtWidgets.QToolButton()
         self.tag_filter_btn.setText(tr("Tags"))
-        self.tag_filter_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.tag_filter_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup
+        )
         self._build_tag_menu()
 
         self.days_filter = NoScrollComboBox()
@@ -266,9 +268,11 @@ class MainWindow(
         
         self.listw = QtWidgets.QListView()
         self.listw.setUniformItemSizes(False)
-        self.listw.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.listw.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.listw.setWordWrap(True)
-        self.listw.setTextElideMode(QtCore.Qt.ElideRight)
+        self.listw.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         
         self.item_delegate = SnapshotItemDelegate(self.listw)
         self.listw.setItemDelegate(self.item_delegate)
@@ -281,13 +285,13 @@ class MainWindow(
         
         self.empty_state = QtWidgets.QWidget()
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state)
-        empty_layout.setAlignment(QtCore.Qt.AlignCenter)
+        empty_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_icon = QtWidgets.QLabel("📭")
         empty_icon.setStyleSheet("font-size: 48px; color: #606078;")
-        empty_icon.setAlignment(QtCore.Qt.AlignCenter)
+        empty_icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_text = QtWidgets.QLabel(tr("No snapshots found.\nPress 'New Snapshot' to create one."))
         empty_text.setStyleSheet("font-size: 14px; color: #9090a8;")
-        empty_text.setAlignment(QtCore.Qt.AlignCenter)
+        empty_text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_icon)
         empty_layout.addWidget(empty_text)
         
@@ -422,7 +426,7 @@ class MainWindow(
         left_wrap.setLayout(left)
         right_wrap = QtWidgets.QWidget()
         right_wrap.setLayout(right)
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
         splitter.addWidget(left_wrap)
         splitter.addWidget(right_wrap)
         splitter.setStretchFactor(0, 0)
@@ -458,7 +462,7 @@ class MainWindow(
         self.git_timer.start()
         self._recent_workers: Dict[str, QtCore.QThread] = {}
 
-        self.on_settings_applied = None
+        self.on_settings_applied: Optional[Callable[[], None]] = None
         self._is_closing = False
         self._quit_requested = False
 
@@ -506,7 +510,7 @@ class MainWindow(
     def open_settings(self) -> None:
         dlg = SettingsDialog(self, self.settings, index_path=self.index_path, snaps_dir=self.snaps_dir)
         dlg.settingsImported.connect(self.apply_imported_backup)
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 
         vals = dlg.values()

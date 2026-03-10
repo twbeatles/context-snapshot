@@ -43,5 +43,12 @@
 
 ### Build / test
 - Run app: `python ctxsnap_win.py`
+- Type check: `pyright`
 - Test: `pytest -q`
 - Build: `python -m PyInstaller ctxsnap_win.spec`
+
+### Repo guardrails
+- `pyrightconfig.json`: shared Pylance/pyright rules (Windows, Python 3.11)
+- `.editorconfig`: UTF-8 + CRLF + final-newline/trailing-space policy
+- `.gitattributes`: repository text EOL normalization
+- CI (`.github/workflows/ci.yml`): runs `pyright` then `pytest`
