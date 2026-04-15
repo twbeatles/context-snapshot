@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ctxsnap.app_storage import load_json, migrate_snapshot, now_iso, save_json, save_snapshot_file
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.sync.base import SyncConflict, SyncPayload, SyncProvider, snapshot_sort_key
+from ctxsnap.services.snapshot_service import SnapshotService
 from ctxsnap.utils import build_search_blob
 
 LOGGER = logging.getLogger(APP_NAME)
@@ -32,6 +33,7 @@ class SyncEngine:
         self.local_snaps_dir = local_snaps_dir
         self.conflicts_path = conflicts_path
         self.state_path = state_path
+        self.snapshot_service = SnapshotService()
 
     @staticmethod
     def _entry_from_snapshot(snap: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,6 +136,26 @@ class SyncEngine:
         # deterministic fallback: prefer local
         return local, conflict
 
+    def _merge_tombstones(
+        self,
+        local_tombstones: List[Dict[str, str]],
+        remote_tombstones: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        merged: Dict[str, str] = {}
+        for item in list(local_tombstones) + list(remote_tombstones):
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("id") or "").strip()
+            deleted_at = str(item.get("deleted_at") or "").strip()
+            if not sid or not deleted_at:
+                continue
+            previous = merged.get(sid, "")
+            if deleted_at > previous:
+                merged[sid] = deleted_at
+        return self.snapshot_service.normalize_tombstones(
+            [{"id": sid, "deleted_at": deleted_at} for sid, deleted_at in merged.items()]
+        )
+
     def _record_conflicts(self, conflicts: List[SyncConflict]) -> None:
         if not conflicts:
             return
@@ -160,9 +182,12 @@ class SyncEngine:
     def sync(self) -> Dict[str, Any]:
         LOGGER.info("sync_pull provider=%s", self.provider.name)
         remote = self.provider.pull()
-        local_index = load_json(self.local_index_path, default={"snapshots": []})
+        local_index = self.snapshot_service.migrate_index(load_json(self.local_index_path, default={"snapshots": []}))
+        remote_index = self.snapshot_service.migrate_index(remote.index if isinstance(remote.index, dict) else {"snapshots": []})
         local_map = self._load_local_snapshots()
         remote_map = self._payload_map(remote.snapshots)
+        local_tombstones = self.snapshot_service.normalize_tombstones(local_index.get("tombstones", []))
+        remote_tombstones = self.snapshot_service.normalize_tombstones(remote_index.get("tombstones", []))
 
         merged: Dict[str, Dict[str, Any]] = {}
         conflicts: List[SyncConflict] = []
@@ -175,7 +200,29 @@ class SyncEngine:
                 conflicts.append(conflict)
                 LOGGER.warning("sync_conflict sid=%s reason=%s", sid, conflict.reason)
 
+        merged_tombstones = self._merge_tombstones(local_tombstones, remote_tombstones)
+        surviving_tombstones: List[Dict[str, str]] = []
+        for tombstone in merged_tombstones:
+            sid = tombstone["id"]
+            snap = merged.get(sid)
+            if not snap:
+                surviving_tombstones.append(tombstone)
+                continue
+            snapshot_stamp = self.snapshot_service.snapshot_timestamp(snap)
+            if tombstone["deleted_at"] >= snapshot_stamp:
+                merged.pop(sid, None)
+                surviving_tombstones.append(tombstone)
+        merged_tombstones = self.snapshot_service.prune_tombstones(surviving_tombstones)
+
         # Persist local snapshots and regenerate local index entries.
+        existing_local_files = {p.stem: p for p in self.local_snaps_dir.glob("*.json")}
+        for sid, path in existing_local_files.items():
+            if sid in merged:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                LOGGER.warning("sync cleanup failed for %s: %s", path.name, exc)
         for sid, snap in merged.items():
             save_snapshot_file(self.local_snaps_dir / f"{sid}.json", snap)
 
@@ -186,8 +233,10 @@ class SyncEngine:
         merged_index["schema_version"] = max(2, self._to_int(merged_index.get("schema_version", 1), 1))
         merged_index["updated_at"] = now_iso()
         merged_index["rev"] = self._to_int(merged_index.get("rev", 1), 1) + 1
-        merged_index["search_meta"] = merged_index.get("search_meta") if isinstance(merged_index.get("search_meta"), dict) else {"engine": "blob", "version": 1}
+        merged_index["search_meta"] = merged_index.get("search_meta") if isinstance(merged_index.get("search_meta"), dict) else {"engine": "blob", "version": 2}
+        merged_index["tombstones"] = merged_tombstones
         merged_index["snapshots"] = [self._entry_from_snapshot(s) for _, s in sorted(merged.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)]
+        merged_index = self.snapshot_service.migrate_index(merged_index)
         save_json(self.local_index_path, merged_index)
 
         payload = SyncPayload(

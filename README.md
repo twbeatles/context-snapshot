@@ -353,6 +353,16 @@ CtxSnap은 시스템 트레이에 상주합니다.
 | Encrypt Note/TODO/Processes/Running Apps | 민감 필드 선택 암호화 | `true` |
 | Enable Field Query | `tag:`, `root:`, `todo:` 필드 쿼리 허용 | `true` |
 | Saved Queries | 검색 프리셋 목록 | `[]` |
+| Default Root | 타이머/Git 자동 스냅샷에 쓰는 명시 루트 | 사용자 홈 폴더 |
+
+### 현재 동작 메모
+
+- `Default Root`는 Settings > General에서만 변경되며, 스냅샷 저장/수정 시 자동으로 덮어써지지 않습니다.
+- 저장된 검색식은 메인 검색창 옆 드롭다운에서 바로 적용할 수 있습니다.
+- DPAPI가 켜진 스냅샷은 복호화된 민감 텍스트를 `index.json`의 `search_blob`에 저장하지 않습니다. 자유 검색은 런타임 복호화로만 보완됩니다.
+- 복호화에 실패하면 상세 패널과 복원 미리보기에서 경고를 표시합니다.
+- 스냅샷 삭제는 sync에서 `30일 tombstone`으로 전파되어, 다른 장치에서 오래된 스냅샷이 다시 살아나는 것을 막습니다.
+- `Export Selected Snapshot` / `Export Weekly Report`는 민감 데이터가 있거나 복호화 실패 상태면 `Full export`와 `Redacted export` 중 하나를 먼저 선택해야 합니다.
 
 ### Restore 탭
 
@@ -539,7 +549,7 @@ python -m PyInstaller ctxsnap_win.spec
 - [x] DPAPI 기반 선택 암호화(기능 플래그)
 - [ ] 클라우드 provider 실연동
 - [ ] Slack/Notion 연동
-- [ ] 검색 UX 고도화(저장 쿼리 관리 UI)
+- [x] 저장 쿼리 즉시 적용 드롭다운(메인 검색창)
 
 ### 💡 기능 제안
 

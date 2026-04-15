@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import html
 import json
 from dataclasses import asdict
 from datetime import datetime
@@ -45,6 +46,31 @@ class MainWindowSnapshotCrudSection:
     def _save_snapshot_or_raise(self, path: Path, snap: Dict[str, Any], label: str) -> None:
         if not save_snapshot_file(path, snap):
             raise RuntimeError(f"Failed to save {label}: {path}")
+
+    def _prepare_snapshot_for_persist(self, snap: Dict[str, Any]) -> Dict[str, Any]:
+        persisted = copy.deepcopy(snap)
+        existing_envelope = copy.deepcopy(persisted.get("sensitive")) if isinstance(persisted.get("sensitive"), dict) else None
+        persisted.pop("_security_error", None)
+        if bool(self.settings.get("dev_flags", {}).get("security_enabled", False)):
+            persisted = self.security_service.encrypt_snapshot_sensitive_fields(persisted, self.settings)
+            LOGGER.info("security_encrypt snapshot_id=%s", persisted.get("id", ""))
+        else:
+            has_sensitive_fields = bool(
+                str(persisted.get("note", "") or "").strip()
+                or any(str(item or "").strip() for item in (persisted.get("todos", []) or []))
+                or bool(persisted.get("processes"))
+                or bool(persisted.get("running_apps"))
+            )
+            if has_sensitive_fields or not existing_envelope:
+                persisted.pop("sensitive", None)
+            else:
+                persisted["sensitive"] = existing_envelope
+        return persisted
+
+    def _persist_snapshot_or_raise(self, path: Path, snap: Dict[str, Any], label: str) -> Dict[str, Any]:
+        persisted = self._prepare_snapshot_for_persist(snap)
+        self._save_snapshot_or_raise(path, persisted, label)
+        return persisted
 
     @staticmethod
     def _index_entry_from_snapshot_data(snap: Dict[str, Any], *, snap_mtime: float = 0.0) -> Dict[str, Any]:
@@ -154,16 +180,21 @@ class MainWindowSnapshotCrudSection:
             return str(it.get("auto_fingerprint", "")) == auto_fingerprint
         return False
 
-    def load_snapshot(self, sid: str) -> Optional[Dict[str, Any]]:
+    def load_snapshot_raw(self, sid: str) -> Optional[Dict[str, Any]]:
         p = self.snap_path(sid)
         if not p.exists():
             return None
         try:
-            snap = migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
-            return self.security_service.decrypt_snapshot_sensitive_fields(snap)
+            return migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, Exception) as e:
             log_exc(f"load snapshot {sid}", e)
             return None
+
+    def load_snapshot(self, sid: str) -> Optional[Dict[str, Any]]:
+        snap = self.load_snapshot_raw(sid)
+        if not snap:
+            return None
+        return self.security_service.decrypt_snapshot_sensitive_fields(snap)
 
     def save_snapshot(self, snap: Snapshot) -> bool:
         snap_path = self.snap_path(snap.id)
@@ -175,10 +206,7 @@ class MainWindowSnapshotCrudSection:
             snap_data = self.snapshot_service.prepare_new_snapshot(asdict(snap))
             if not snap_data.get("updated_at"):
                 snap_data["updated_at"] = now_iso()
-            if bool(self.settings.get("dev_flags", {}).get("security_enabled", False)):
-                snap_data = self.security_service.encrypt_snapshot_sensitive_fields(snap_data, self.settings)
-                LOGGER.info("security_encrypt snapshot_id=%s", snap.id)
-            self._save_snapshot_or_raise(snap_path, snap_data, f"snapshot {snap.id}")
+            snap_data = self._persist_snapshot_or_raise(snap_path, snap_data, f"snapshot {snap.id}")
             snap_mtime = snapshot_mtime(snap_path)
             self.index["snapshots"].insert(
                 0,
@@ -186,8 +214,6 @@ class MainWindowSnapshotCrudSection:
             )
             self.index = self.snapshot_service.touch_index(self.index)
             self._save_json_or_raise(self.index_path, self.index, "index")
-            self.settings["default_root"] = snap.root
-            self._save_json_or_raise(self.settings_path, self.settings, "settings")
             return True
         except Exception as exc:
             log_exc("save snapshot", exc if isinstance(exc, Exception) else Exception(str(exc)))
@@ -223,37 +249,61 @@ class MainWindowSnapshotCrudSection:
             self.detail.setText("")
             return
 
-        self.detail_title.setText(snap.get("title", sid))
+        self.detail_title.setText(str(snap.get("title", sid)))
         tags = snap.get("tags", [])
         pinned = "📌" if bool(snap.get("pinned", False)) else ""
         archived = "🗄️ " if bool(snap.get("archived", False)) else ""
-        ws = snap.get("vscode_workspace", "")
+        ws = str(snap.get("vscode_workspace", "") or "")
+        security_error = str(snap.get("_security_error", "") or "").strip()
         ws_line = f"  •  workspace: {ws}" if ws else ""
-        tag_line = f"  •  tags: {', '.join(tags)}" if tags else ""
+        tag_line = f"  •  tags: {', '.join(str(tag) for tag in tags)}" if tags else ""
+        security_line = "  •  [Security Warning]" if security_error else ""
         self.detail_meta.setText(
-            f"{archived}{pinned}{snap.get('created_at','')}  •  {snap.get('root','')}{ws_line}{tag_line}"
+            f"{archived}{pinned}{snap.get('created_at','')}  •  {snap.get('root','')}{ws_line}{tag_line}{security_line}"
         )
 
         todos = snap.get("todos", [])
         recent = snap.get("recent_files", [])
         proc = snap.get("processes", [])
         running_apps = snap.get("running_apps", [])
+        security_html = ""
+        if security_error:
+            security_html = (
+                "<p style='color:#f59e0b; font-weight:600;'>Security warning: "
+                "Sensitive fields could not be decrypted on this machine.</p>"
+                f"<p style='color:#9ca3af;'>{html.escape(security_error)}</p>"
+            )
         
-        note_content = snap.get('note', '') or '(none)'
-        todos_html = "".join([f"<li>{t}</li>" for t in todos if t.strip()]) or "(no todos)"
-        recent_html = "".join([f"<li>{p}</li>" for p in recent[:12]]) or "<li>(none)</li>"
-        proc_html = "".join([f"<li><b>{p.get('name','')}</b> <span style='color:gray;'>{p.get('exe','')}</span></li>" for p in proc[:20]]) or "<li>(none)</li>"
-        apps_html = "".join([f"<li><b>{p.get('name','')}</b> <span style='color:gray;'>{p.get('exe','')}</span></li>" for p in running_apps[:20]]) or "<li>(none)</li>"
+        note_content = str(snap.get('note', '') or '(none)')
+        todos_html = "".join([f"<li>{html.escape(str(t))}</li>" for t in todos if str(t).strip()]) or "(no todos)"
+        recent_html = "".join([f"<li>{html.escape(str(p))}</li>" for p in recent[:12]]) or "<li>(none)</li>"
+        proc_html = "".join(
+            [
+                f"<li><b>{html.escape(str(p.get('name','')))}</b> "
+                f"<span style='color:gray;'>{html.escape(str(p.get('exe','')))}</span></li>"
+                for p in proc[:20]
+                if isinstance(p, dict)
+            ]
+        ) or "<li>(none)</li>"
+        apps_html = "".join(
+            [
+                f"<li><b>{html.escape(str(p.get('name','')))}</b> "
+                f"<span style='color:gray;'>{html.escape(str(p.get('exe','')))}</span></li>"
+                for p in running_apps[:20]
+                if isinstance(p, dict)
+            ]
+        ) or "<li>(none)</li>"
         
-        html = f"""
+        html_text = f"""
         <style>
             h3 {{ color: #a78bfa; margin-bottom: 2px; margin-top: 14px; font-size: 14px; }}
             ul {{ margin-top: 2px; margin-bottom: 6px; padding-left: 20px; }}
             li {{ margin-top: 2px; }}
             p {{ margin-top: 2px; margin-bottom: 6px; }}
         </style>
+        {security_html}
         <h3>📝 NOTE</h3>
-        <p>{note_content}</p>
+        <p>{html.escape(note_content)}</p>
         
         <h3>✅ TODOs</h3>
         <ul>{todos_html}</ul>
@@ -267,7 +317,7 @@ class MainWindowSnapshotCrudSection:
         <h3>💻 Running apps (taskbar, {len(running_apps)})</h3>
         <ul>{apps_html}</ul>
         """
-        self.detail.setHtml(html)
+        self.detail.setHtml(html_text)
 
     # ----- actions -----
     def edit_selected(self) -> None:
@@ -323,10 +373,9 @@ class MainWindowSnapshotCrudSection:
         if not snap:
             return
 
-        prev_snap = copy.deepcopy(snap)
         prev_index = copy.deepcopy(self.index)
-        prev_settings = copy.deepcopy(self.settings)
         snap_path = self.snap_path(sid)
+        prev_snapshot_raw = snap_path.read_text(encoding="utf-8") if snap_path.exists() else None
 
         try:
             # Update snapshot fields
@@ -337,12 +386,7 @@ class MainWindowSnapshotCrudSection:
             snap["todos"] = self._normalized_todos(todos)
             snap["tags"] = self._normalized_tags(tags)
             snap = self.snapshot_service.touch_snapshot(snap)
-            if bool(self.settings.get("dev_flags", {}).get("security_enabled", False)):
-                snap = self.security_service.encrypt_snapshot_sensitive_fields(snap, self.settings)
-                LOGGER.info("security_encrypt snapshot_id=%s", sid)
-
-            # Write updated snapshot file
-            self._save_snapshot_or_raise(snap_path, snap, f"snapshot {sid}")
+            snap = self._persist_snapshot_or_raise(snap_path, snap, f"snapshot {sid}")
             snap_mtime = snapshot_mtime(snap_path)
 
             # Update index entry
@@ -352,22 +396,18 @@ class MainWindowSnapshotCrudSection:
                     break
             self.index = self.snapshot_service.touch_index(self.index)
             self._save_json_or_raise(self.index_path, self.index, "index")
-
-            # Update default_root setting
-            self.settings["default_root"] = root
-            self._save_json_or_raise(self.settings_path, self.settings, "settings")
         except Exception as exc:
             log_exc("update snapshot", exc if isinstance(exc, Exception) else Exception(str(exc)))
             self.index = prev_index
-            self.settings = prev_settings
             try:
-                self._save_snapshot_or_raise(snap_path, prev_snap, f"snapshot rollback {sid}")
+                if prev_snapshot_raw is None:
+                    snap_path.unlink(missing_ok=True)
+                else:
+                    snap_path.write_text(prev_snapshot_raw, encoding="utf-8")
             except Exception as rollback_exc:
                 log_exc("rollback snapshot update file", rollback_exc)
             if not save_json(self.index_path, self.index):
                 LOGGER.error("Failed to rollback index file after update error.")
-            if not save_json(self.settings_path, self.settings):
-                LOGGER.error("Failed to rollback settings file after update error.")
             QtWidgets.QMessageBox.warning(
                 self._parent_widget(self),
                 tr("Error"),
@@ -522,7 +562,7 @@ class MainWindowSnapshotCrudSection:
         tags: Optional[List[str]] = None,
     ) -> None:
         """Update snapshot file + index with given metadata."""
-        snap = self.load_snapshot(sid)
+        snap = self.load_snapshot_raw(sid)
         if not snap:
             return
         prev_snap = copy.deepcopy(snap)
@@ -536,9 +576,7 @@ class MainWindowSnapshotCrudSection:
             if tags is not None:
                 snap["tags"] = self._normalized_tags(tags)
             snap = self.snapshot_service.touch_snapshot(snap)
-            if bool(self.settings.get("dev_flags", {}).get("security_enabled", False)):
-                snap = self.security_service.encrypt_snapshot_sensitive_fields(snap, self.settings)
-            self._save_snapshot_or_raise(snap_path, snap, f"snapshot meta {sid}")
+            snap = self._persist_snapshot_or_raise(snap_path, snap, f"snapshot meta {sid}")
             snap_mtime = snapshot_mtime(snap_path)
 
             # update index
@@ -613,6 +651,7 @@ class MainWindowSnapshotCrudSection:
                 )
                 return
         self.index["snapshots"] = [x for x in self.index.get("snapshots", []) if x.get("id") != sid]
+        self.index = self.snapshot_service.upsert_tombstone(self.index, sid)
         self.index = self.snapshot_service.touch_index(self.index)
         if not save_json(self.index_path, self.index):
             QtWidgets.QMessageBox.warning(

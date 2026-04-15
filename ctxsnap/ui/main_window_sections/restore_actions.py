@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtWidgets
 
@@ -21,6 +21,87 @@ class MainWindowRestoreActionsSection:
     @staticmethod
     def _parent_widget(instance: object) -> QtWidgets.QWidget:
         return cast(QtWidgets.QWidget, instance)
+
+    def _prompt_sensitive_export_mode(
+        self,
+        *,
+        title: str,
+        has_sensitive: bool,
+        has_security_error: bool,
+    ) -> Optional[str]:
+        if not has_sensitive and not has_security_error:
+            return "full"
+        msg = QtWidgets.QMessageBox(self._parent_widget(self))
+        msg.setWindowTitle(title)
+        msg.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg.setText("This export may include sensitive data.")
+        details: List[str] = []
+        if has_sensitive:
+            details.append("Sensitive note, TODO, process, or running-app data is included.")
+        if has_security_error:
+            details.append("Some encrypted fields could not be decrypted on this machine.")
+        details.append("Choose a redacted export to remove sensitive content.")
+        msg.setInformativeText("\n".join(details))
+        btn_full = msg.addButton("Full export", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        btn_redacted = msg.addButton("Redacted export", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        msg.addButton(tr("Cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == btn_full:
+            return "full"
+        if clicked == btn_redacted:
+            return "redacted"
+        return None
+
+    @staticmethod
+    def _snapshot_has_sensitive_payload(snap: Dict[str, Any]) -> bool:
+        if not isinstance(snap, dict):
+            return False
+        if str(snap.get("note", "") or "").strip():
+            return True
+        if any(str(item or "").strip() for item in (snap.get("todos", []) or [])):
+            return True
+        if bool(snap.get("processes")) or bool(snap.get("running_apps")):
+            return True
+        envelope = snap.get("sensitive")
+        return isinstance(envelope, dict) and bool(envelope)
+
+    @staticmethod
+    def _snapshot_export_payload(snap: Dict[str, Any], *, redacted: bool) -> Dict[str, Any]:
+        out = dict(snap)
+        out.pop("_security_error", None)
+        if not redacted:
+            return out
+        out.pop("sensitive", None)
+        out.pop("note", None)
+        out.pop("todos", None)
+        out.pop("processes", None)
+        out.pop("running_apps", None)
+        return out
+
+    @staticmethod
+    def _weekly_report_lines(snaps: List[Dict[str, Any]], *, redacted: bool) -> List[str]:
+        lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
+        for snap in snaps:
+            lines.append(f"## {snap.get('title','(no title)')}")
+            lines.append(f"- Created: {snap.get('created_at','')}")
+            lines.append(f"- Root: {snap.get('root','')}")
+            tags = snap.get("tags", [])
+            if tags:
+                lines.append(f"- Tags: {', '.join(str(tag) for tag in tags)}")
+            todos = [str(t) for t in snap.get("todos", []) if str(t).strip()]
+            if todos:
+                lines.append("### TODOs")
+                if redacted:
+                    lines.append("- (redacted)")
+                else:
+                    lines.extend([f"- {t}" for t in todos])
+            note = str(snap.get("note", "") or "")
+            if note:
+                lines.append("### Note")
+                lines.append("(redacted)" if redacted else note)
+            lines.append("")
+        return lines
 
     def open_selected_root(self) -> None:
         sid = self.selected_id()
@@ -54,6 +135,13 @@ class MainWindowRestoreActionsSection:
         snap = self.load_snapshot(sid)
         if not snap:
             return
+        export_mode = self._prompt_sensitive_export_mode(
+            title="Export snapshot",
+            has_sensitive=self._snapshot_has_sensitive_payload(snap),
+            has_security_error=bool(str(snap.get("_security_error", "") or "").strip()),
+        )
+        if not export_mode:
+            return
         default_name = f"snapshot_{sid}.json"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self._parent_widget(self),
@@ -63,7 +151,10 @@ class MainWindowRestoreActionsSection:
         )
         if not path:
             return
-        if save_snapshot_file(Path(path), snap):
+        if save_snapshot_file(
+            Path(path),
+            self._snapshot_export_payload(snap, redacted=(export_mode == "redacted")),
+        ):
             self.statusBar().showMessage("Snapshot exported.", 2500)
         else:
             QtWidgets.QMessageBox.warning(
@@ -73,6 +164,27 @@ class MainWindowRestoreActionsSection:
             )
 
     def export_weekly_report(self) -> None:
+        cutoff = datetime.now() - timedelta(days=7)
+        snaps: List[Dict[str, Any]] = []
+        has_sensitive = False
+        has_security_error = False
+        for it in self.index.get("snapshots", []):
+            created_at = safe_parse_datetime(it.get("created_at", ""))
+            if not created_at:
+                continue
+            if created_at < cutoff:
+                continue
+            snap = self.load_snapshot(it.get("id", "")) or {}
+            snaps.append(snap)
+            has_sensitive = has_sensitive or self._snapshot_has_sensitive_payload(snap)
+            has_security_error = has_security_error or bool(str(snap.get("_security_error", "") or "").strip())
+        export_mode = self._prompt_sensitive_export_mode(
+            title="Export weekly report",
+            has_sensitive=has_sensitive,
+            has_security_error=has_security_error,
+        )
+        if not export_mode:
+            return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self._parent_widget(self),
             "Export weekly report",
@@ -81,30 +193,7 @@ class MainWindowRestoreActionsSection:
         )
         if not path:
             return
-        cutoff = datetime.now() - timedelta(days=7)
-        lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
-        for it in self.index.get("snapshots", []):
-            created_at = safe_parse_datetime(it.get("created_at", ""))
-            if not created_at:
-                continue
-            if created_at < cutoff:
-                continue
-            snap = self.load_snapshot(it.get("id", "")) or {}
-            lines.append(f"## {snap.get('title','(no title)')}")
-            lines.append(f"- Created: {snap.get('created_at','')}")
-            lines.append(f"- Root: {snap.get('root','')}")
-            tags = snap.get("tags", [])
-            if tags:
-                lines.append(f"- Tags: {', '.join(tags)}")
-            todos = [t for t in snap.get("todos", []) if t]
-            if todos:
-                lines.append("### TODOs")
-                lines.extend([f"- {t}" for t in todos])
-            note = snap.get("note", "")
-            if note:
-                lines.append("### Note")
-                lines.append(note)
-            lines.append("")
+        lines = self._weekly_report_lines(snaps, redacted=(export_mode == "redacted"))
         Path(path).write_text("\n".join(lines), encoding="utf-8")
         self.statusBar().showMessage("Weekly report exported.", 2500)
 
@@ -137,10 +226,10 @@ class MainWindowRestoreActionsSection:
         dlg.exec()
 
     def restore_last(self) -> None:
-        items = self.index.get("snapshots", [])
-        if not items:
+        item = self.snapshot_service.latest_snapshot_item(self.index.get("snapshots", []))
+        if not item:
             return
-        sid = items[0].get("id")
+        sid = item.get("id")
         if not sid:
             return
         self._restore_by_id(sid)
@@ -180,6 +269,7 @@ class MainWindowRestoreActionsSection:
                 open_terminal_default,
                 open_vscode_default,
                 open_running_apps_default,
+                show_checklist=show_checklist_default,
                 profiles=profiles,
                 selected_profile=profile_default,
             )

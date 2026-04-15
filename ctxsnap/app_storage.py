@@ -57,7 +57,8 @@ def _default_index() -> Dict[str, Any]:
         "schema_version": 2,
         "rev": 1,
         "updated_at": now_iso(),
-        "search_meta": {"engine": "blob", "version": 1},
+        "search_meta": {"engine": "blob", "version": 2},
+        "tombstones": [],
         "snapshots": [],
     }
 
@@ -396,7 +397,10 @@ def export_backup_to_file(
     data: Dict[str, Any] = {}
     if include_index:
         try:
-            data["index"] = load_json(index_path, default=_default_index())
+            index = load_json(index_path, default=_default_index())
+            if not isinstance(index.get("tombstones"), list):
+                index["tombstones"] = []
+            data["index"] = index
         except Exception as exc:
             LOGGER.exception("read index for export: %s", exc)
             data["index"] = _default_index()

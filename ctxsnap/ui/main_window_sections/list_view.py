@@ -7,11 +7,10 @@ from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from ctxsnap.app_storage import save_json
 from ctxsnap.constants import DEFAULT_TAGS
 from ctxsnap.core.logging import get_logger
 from ctxsnap.i18n import tr
-from ctxsnap.utils import build_search_blob, safe_parse_datetime, snapshot_mtime
+from ctxsnap.utils import safe_parse_datetime
 
 LOGGER = get_logger()
 
@@ -86,7 +85,6 @@ class MainWindowListViewSection:
         show_archived = bool(self.show_archived.isChecked()) if hasattr(self, "show_archived") else False
 
         items = list(self.index.get("snapshots", []))
-        index_changed = False
         view_items: List[Dict[str, Any]] = []
 
         sort_mode = self.sort_combo.currentData() if hasattr(self, "sort_combo") else "newest"
@@ -118,20 +116,6 @@ class MainWindowListViewSection:
             if bool(it.get("archived", False)) and not show_archived:
                 continue
             if query_raw:
-                if parsed_query.terms:
-                    search_blob = (it.get("search_blob") or "").lower()
-                    snap_mtime = 0.0
-                    if it.get("id"):
-                        snap_mtime = snapshot_mtime(self.snap_path(it["id"]))
-                    if it.get("search_blob_mtime", 0.0) < snap_mtime:
-                        search_blob = ""
-                    if not search_blob and it.get("id"):
-                        snap = self.load_snapshot(it.get("id"))
-                        if snap:
-                            search_blob = build_search_blob(snap)
-                            it["search_blob"] = search_blob
-                            it["search_blob_mtime"] = snap_mtime or snapshot_mtime(self.snap_path(it["id"]))
-                            index_changed = True
                 if not self.search_service.matches_item(
                     it,
                     parsed_query,
@@ -148,10 +132,6 @@ class MainWindowListViewSection:
                     continue
 
             view_items.append(it)
-        if index_changed:
-            self.index = self.snapshot_service.touch_index(self.index)
-            if not save_json(self.index_path, self.index):
-                LOGGER.warning("Failed to persist search blob cache updates.")
         page_size = max(1, int(self.settings.get("list_page_size", 200)))
         total = len(view_items)
         self._total_pages = max(1, (total + page_size - 1) // page_size)

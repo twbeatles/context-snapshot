@@ -209,6 +209,19 @@ class SettingsDialog(QtWidgets.QDialog):
         lang_layout.addWidget(self.lang_combo)
         lang_layout.addStretch(1)
 
+        self.default_root_edit = QtWidgets.QLineEdit(str(settings.get("default_root", str(Path.home()))))
+        self.default_root_edit.setPlaceholderText(str(Path.home()))
+        self.default_root_btn = QtWidgets.QPushButton(tr("Browse"))
+        self.default_root_btn.clicked.connect(self.pick_default_root)
+        default_root_row = QtWidgets.QHBoxLayout()
+        default_root_row.setSpacing(8)
+        default_root_row.addWidget(self.default_root_edit, 1)
+        default_root_row.addWidget(self.default_root_btn)
+        default_root_box = QtWidgets.QGroupBox(tr("Default Root"))
+        default_root_layout = QtWidgets.QVBoxLayout(default_root_box)
+        default_root_layout.setSpacing(8)
+        default_root_layout.addLayout(default_root_row)
+
         # Recent files settings
         self.recent_spin = NoScrollSpinBox()
         self.recent_spin.setRange(0, 300)
@@ -411,6 +424,7 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.setSpacing(12)
         general_layout.setContentsMargins(16, 16, 16, 16)
         general_layout.addWidget(lang_box)
+        general_layout.addWidget(default_root_box)
         general_layout.addWidget(scan_box)
         general_layout.addWidget(capture_box)
         general_layout.addWidget(auto_box)
@@ -693,6 +707,12 @@ class SettingsDialog(QtWidgets.QDialog):
         self.apply_settings_to_controls(new_settings)
         self.b_msg.setText("✅ " + tr("Reset to defaults done"))
 
+    def pick_default_root(self) -> None:
+        start = self.default_root_edit.text().strip() or str(Path.home())
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Default Root"), start)
+        if path:
+            self.default_root_edit.setText(path)
+
     def apply_settings_to_controls(self, settings: Dict[str, Any], *, reset_import_state: bool = True) -> None:
         """Apply a settings dict to UI controls (does not save to disk here)."""
         settings = migrate_settings(settings)
@@ -708,6 +728,8 @@ class SettingsDialog(QtWidgets.QDialog):
             self.lang_combo.setCurrentIndex(idx)
         else:
             self.lang_combo.setCurrentIndex(0) # Default to auto if unknown
+
+        self.default_root_edit.setText(str(settings.get("default_root", str(Path.home()))))
 
         hk = settings.get("hotkey", {})
         self.hk_enabled.setChecked(bool(hk.get("enabled", True)))
@@ -915,6 +937,10 @@ class SettingsDialog(QtWidgets.QDialog):
             if not (self.hk_ctrl.isChecked() or self.hk_alt.isChecked() or self.hk_shift.isChecked()):
                 self.err.setText("⚠️ " + tr("Hotkey selection err"))
                 return
+        default_root = self.default_root_edit.text().strip()
+        if default_root and (not Path(default_root).exists() or not Path(default_root).is_dir()):
+            self.err.setText(tr("Root invalid"))
+            return
         self.accept()
 
     def values(self) -> Dict[str, Any]:
@@ -927,6 +953,7 @@ class SettingsDialog(QtWidgets.QDialog):
         return {
             "schema_version": 2,
             "language": self.lang_combo.currentData(),
+            "default_root": self.default_root_edit.text().strip() or str(Path.home()),
             "recent_files_limit": int(self.recent_spin.value()),
             "restore_preview_default": bool(self.preview_default.isChecked()),
             "tags": tags or DEFAULT_TAGS,
@@ -961,6 +988,7 @@ class SettingsDialog(QtWidgets.QDialog):
             "archive_after_days": int(self.archive_after_days.value()),
             "archive_skip_pinned": bool(self.archive_skip_pinned.isChecked()),
             "auto_backup_hours": int(self.auto_backup_hours.value()),
+            "auto_backup_last": str(self._settings.get("auto_backup_last", "")),
             "templates": self._templates_cache,
             "auto_snapshot_minutes": int(self.auto_snapshot_minutes.value()),
             "auto_snapshot_on_git_change": bool(self.auto_snapshot_on_git.isChecked()),
@@ -998,4 +1026,5 @@ class SettingsDialog(QtWidgets.QDialog):
                 "open_running_apps": bool(self.rs_running_apps.isChecked()),
                 "show_post_restore_checklist": bool(self.rs_checklist.isChecked()),
             },
+            "onboarding_shown": bool(self._settings.get("onboarding_shown", False)),
         }

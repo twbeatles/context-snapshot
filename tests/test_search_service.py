@@ -39,3 +39,20 @@ def test_field_query_disabled_treats_token_as_plain_term() -> None:
     parsed = svc.parse("tag:work", field_enabled=False)
     item = {"id": "x", "title": "tag:work done", "root": "", "tags": [], "search_blob": ""}
     assert svc.matches_item(item, parsed, load_snapshot=None) is True
+
+
+def test_free_text_search_can_match_runtime_decrypted_snapshot_without_cache() -> None:
+    svc = SearchService()
+    parsed = svc.parse("secret-note", field_enabled=True)
+    item = {"id": "x", "title": "plain", "root": "", "tags": [], "search_blob": ""}
+
+    def loader(_: str):
+        return {
+            "note": "secret-note",
+            "todos": ["", "", ""],
+            "recent_files": [],
+            "processes": [],
+            "running_apps": [],
+        }
+
+    assert svc.matches_item(item, parsed, load_snapshot=loader) is True

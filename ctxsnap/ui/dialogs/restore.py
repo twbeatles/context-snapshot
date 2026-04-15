@@ -14,6 +14,7 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         open_vscode: bool,
         open_running_apps: bool,
         *,
+        show_checklist: bool = True,
         profiles: Optional[List[Dict[str, Any]]] = None,
         selected_profile: str = "",
     ):
@@ -44,7 +45,7 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         self.cb_terminal.setChecked(open_terminal)
         self.cb_vscode.setChecked(open_vscode)
         self.cb_running_apps.setChecked(open_running_apps)
-        self.cb_checklist.setChecked(True)
+        self.cb_checklist.setChecked(show_checklist)
         
         options_layout.addWidget(self.cb_folder)
         options_layout.addWidget(self.cb_terminal)
@@ -68,6 +69,15 @@ class RestorePreviewDialog(QtWidgets.QDialog):
             profile_row.addWidget(self.profile_combo, 1)
             options_layout.addLayout(profile_row)
             self._apply_selected_profile(self.profile_combo.currentIndex())
+
+        security_error = str(snap.get("_security_error", "") or "").strip()
+        if security_error:
+            warning = QtWidgets.QLabel(
+                "Security warning: Sensitive fields could not be decrypted on this machine."
+            )
+            warning.setStyleSheet("color: #f59e0b; font-weight: 600;")
+            warning.setWordWrap(True)
+            options_layout.addWidget(warning)
 
         root = snap.get("root", "")
         note = snap.get("note", "")

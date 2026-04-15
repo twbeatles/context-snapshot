@@ -183,8 +183,13 @@ class SnapshotDialog(QtWidgets.QDialog):
     def validate_and_accept(self):
         root = self.root_edit.text().strip()
         # root validation
-        if not root or not Path(root).exists():
+        if not root or not Path(root).exists() or not Path(root).is_dir():
             self.err.setText(tr("Root invalid"))
+            return
+
+        workspace = self.workspace_edit.text().strip()
+        if workspace and (not Path(workspace).exists() or not Path(workspace).is_file()):
+            self.err.setText("Workspace file is invalid.")
             return
         
         # TODOS validation

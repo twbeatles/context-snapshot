@@ -350,6 +350,16 @@ CtxSnap resides in the system tray.
 | Encrypt Note/TODO/Processes/Running Apps | Selective sensitive-field encryption | `true` |
 | Enable Field Query | Enable `tag:`, `root:`, `todo:` tokens | `true` |
 | Saved Queries | Search presets | `[]` |
+| Default Root | Explicit automation root used by timer/Git auto snapshots | User home folder |
+
+### Current Behavior Notes
+
+- `Default Root` is now an explicit Settings > General value. Saving or editing snapshots no longer overwrites it automatically.
+- Saved queries can be applied directly from the dropdown next to the main search box.
+- DPAPI-protected snapshots no longer write decrypted sensitive text into `index.json` `search_blob`. Free-text search falls back to runtime decryption only.
+- When decryption fails, the detail panel and restore preview show a warning instead of failing silently.
+- Snapshot deletion propagates through sync via a `30-day tombstone`, preventing stale remote copies from being resurrected.
+- `Export Selected Snapshot` and `Export Weekly Report` now require choosing `Full export` or `Redacted export` whenever sensitive data is present or decryption has failed.
 
 ### Restore Tab
 
@@ -533,7 +543,7 @@ Please attach this file when creating issues.
 - [x] DPAPI-based selective encryption (feature-flagged)
 - [ ] Production cloud provider integration
 - [ ] Slack/Notion integration
-- [ ] Search UX improvements for saved queries
+- [x] Saved-query quick-apply dropdown on the main search bar
 
 ### 💡 Feature Suggestions
 

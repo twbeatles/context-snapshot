@@ -132,6 +132,8 @@ class SecurityService:
     def encrypt_snapshot_sensitive_fields(self, snap: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
         """Return a new snapshot dict with configured sensitive fields encrypted into `sensitive`."""
         out = deepcopy(snap)
+        out.pop("_security_error", None)
+        out.pop("sensitive", None)
         if not self._security_enabled(settings):
             return out
         if not self.is_available():

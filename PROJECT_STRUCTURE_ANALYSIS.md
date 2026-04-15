@@ -1,154 +1,178 @@
-# CtxSnap 프로젝트 구조 정합성 분석 (업데이트)
+# CtxSnap Project Structure Analysis
 
-- 작성일: 2026-03-10
-- 기준 코드: `main` 워크트리 최신 상태
-- 참조 문서: `README.md`, `README.en.md`, `CLAUDE.md`, `gpt.md`
+- Updated: 2026-04-15
+- Base branch: `main`
+- Reviewed against: `README.md`, `README.en.md`, `CLAUDE.md`, `gpt.md`, current implementation, tests, and `ctxsnap_win.spec`
 
-## 1. 결론 요약
+## 1. High-level summary
 
-코드베이스는 기존 단일 `main_window.py` 집중 구조에서 다음과 같이 분리/고도화된 상태입니다.
+CtxSnap is no longer a monolithic single-window script. The current codebase is split into:
 
-- 서비스 레이어 도입: `ctxsnap/services/*`
-- UI 로직 분할: `ctxsnap/ui/main_window_sections/*`
-- 동기화 엔진 도입: `ctxsnap/core/sync/*`
-- DPAPI 보안 계층 도입: `ctxsnap/core/security.py`
-- 검색 고도화: 필드 쿼리(`tag:`, `root:`, `todo:`)
-- 테스트/CI 도입: `tests/*`, `.github/workflows/ci.yml`
-- 정적 타입 검사 기준선 도입: `pyrightconfig.json`, `.editorconfig`, `.gitattributes`
-- 레거시 `ctxsnap/storage.py` 제거
+- `services/` for business logic and migration helpers
+- `core/` for cross-cutting infrastructure such as logging, workers, security, and sync
+- `ui/main_window_sections/` for focused functional slices of the desktop UI
+- `ui/dialogs/` for reusable modal workflows
+- `tests/` for migration, sync, backup encryption, search, and export helper coverage
 
-즉, 초기 분석 문서의 P0/P1/P2 핵심 방향이 코드에 대부분 반영되었습니다.
+The project is in a healthy modularized state, and the recent review-driven changes tightened security and sync semantics without undoing that separation.
 
-## 2. 최신 폴더 구조
+## 2. Current repository layout
 
 ```text
 context-snapshot/
-├─ ctxsnap_win.py
-├─ ctxsnap_win.spec
-├─ requirements.txt
-├─ requirements-dev.txt
-├─ README.md
-├─ README.en.md
-├─ CLAUDE.md
-├─ gpt.md
-├─ PROJECT_STRUCTURE_ANALYSIS.md
-├─ .github/workflows/ci.yml
-├─ tests/
-│  ├─ test_migration.py
-│  ├─ test_sync_engine.py
-│  ├─ test_security_service.py
-│  ├─ test_backup_encryption.py
-│  └─ test_search_service.py
-└─ ctxsnap/
-   ├─ app_storage.py
-   ├─ constants.py
-   ├─ i18n.py
-   ├─ restore.py
-   ├─ utils.py
-   ├─ core/
-   │  ├─ logging.py
-   │  ├─ worker.py
-   │  ├─ security.py
-   │  └─ sync/
-   │     ├─ base.py
-   │     ├─ engine.py
-   │     └─ providers/
-   │        ├─ local.py
-   │        └─ cloud_stub.py
-   ├─ services/
-   │  ├─ snapshot_service.py
-   │  ├─ restore_service.py
-   │  ├─ backup_service.py
-   │  └─ search_service.py
-   └─ ui/
-      ├─ main_window.py
-      ├─ main_window_sections/
-      │  ├─ automation.py
-      │  ├─ list_view.py
-      │  ├─ snapshot_crud.py
-      │  ├─ settings_backup.py
-      │  └─ restore_actions.py
-      ├─ dialogs/
-      ├─ hotkey.py
-      ├─ models.py
-      └─ styles.py
+├── ctxsnap_win.py
+├── ctxsnap_win.spec
+├── requirements.txt
+├── requirements-dev.txt
+├── pyrightconfig.json
+├── README.md
+├── README.en.md
+├── CLAUDE.md
+├── gpt.md
+├── PROJECT_STRUCTURE_ANALYSIS.md
+├── tests/
+│   ├── test_backup_encryption.py
+│   ├── test_migration.py
+│   ├── test_restore_actions_helpers.py
+│   ├── test_search_service.py
+│   ├── test_security_service.py
+│   └── test_sync_engine.py
+└── ctxsnap/
+    ├── app_storage.py
+    ├── constants.py
+    ├── i18n.py
+    ├── restore.py
+    ├── utils.py
+    ├── core/
+    │   ├── logging.py
+    │   ├── security.py
+    │   ├── worker.py
+    │   └── sync/
+    │       ├── base.py
+    │       ├── engine.py
+    │       └── providers/
+    │           ├── cloud_stub.py
+    │           └── local.py
+    ├── services/
+    │   ├── backup_service.py
+    │   ├── restore_service.py
+    │   ├── search_service.py
+    │   └── snapshot_service.py
+    └── ui/
+        ├── dialogs/
+        ├── hotkey.py
+        ├── main_window.py
+        ├── main_window_sections/
+        │   ├── automation.py
+        │   ├── list_view.py
+        │   ├── restore_actions.py
+        │   ├── settings_backup.py
+        │   └── snapshot_crud.py
+        ├── models.py
+        └── styles.py
 ```
 
-## 3. 런타임 아키텍처
+## 3. Responsibility map
 
-### 3.1 시작/초기화
+### 3.1 Startup and storage
 
-1. `ctxsnap_win.py`에서 Qt 앱/트레이/핫키 초기화
-2. `ensure_storage()`로 저장소 및 기본 파일 생성
-3. `MainWindow`에서 서비스/엔진 생성
-4. 설정 마이그레이션 후 타이머/메뉴/목록 초기화
+- `ctxsnap_win.py` initializes the Qt application shell.
+- `ensure_storage()` creates `%APPDATA%\ctxsnap\` storage and bootstrap files.
+- `migrate_settings()` and `SnapshotService.migrate_index()` normalize old data at startup.
 
-### 3.2 UI 책임 분리
+### 3.2 UI split
 
-- `main_window.py`: 오케스트레이션
-- `main_window_sections/automation.py`: 자동 스냅샷/백업/동기화/보관
-- `main_window_sections/list_view.py`: 검색/필터/페이지네이션/목록
-- `main_window_sections/snapshot_crud.py`: 스냅샷 생성/편집/저장/삭제
-- `main_window_sections/settings_backup.py`: 설정 적용 + 백업 import/export 적용
-- `main_window_sections/restore_actions.py`: 복원/내보내기/히스토리/비교
+- `main_window.py`: top-level composition, shared widgets, menu wiring, saved-query dropdown orchestration
+- `main_window_sections/snapshot_crud.py`: create/edit/delete/toggle metadata/detail rendering
+- `main_window_sections/list_view.py`: search/filter/pagination/list population
+- `main_window_sections/automation.py`: timers, archive policy, recent-file background updates, auto snapshots, sync scheduling
+- `main_window_sections/settings_backup.py`: settings apply/import/export flows and safety rollback
+- `main_window_sections/restore_actions.py`: restore flows, restore history, compare, export actions
 
-### 3.3 서비스 계층
+### 3.3 Service/core split
 
-- `SnapshotService`: snapshot/index 마이그레이션 및 메타 갱신
-- `RestoreService`: 복원 기본값/프로필 처리
-- `BackupService`: 백업 내보내기/가져오기 도메인 처리
-- `SearchService`: 일반 검색 + 필드 쿼리 파싱/매칭
+- `SnapshotService`: schema migration, `rev/updated_at`, tombstone normalization/pruning, latest snapshot selection
+- `SearchService`: free-text search plus field-query parsing and runtime snapshot-assisted matching
+- `RestoreService`: restore defaults and restore-profile resolution
+- `SecurityService`: DPAPI envelope encryption/decryption and sensitive-field stripping helpers
+- `SyncEngine`: pull/merge/push, conflict recording, tombstone-aware deletion propagation
 
-### 3.4 동기화/보안
+## 4. Data model notes
 
-- `SyncEngine`: pull/merge/push + 충돌 큐 기록
-- `LocalSyncProvider`: 로컬 파일 기반 provider
-- `CloudStubSyncProvider`: 클라우드 스텁 provider
-- `SecurityService`: Windows DPAPI 암복호화(선택형)
+Storage root: `%APPDATA%\ctxsnap\`
 
-## 4. 저장 포맷/스키마
+- `settings.json`
+  - `schema_version = 2`
+  - `default_root`
+  - `dev_flags`
+  - `sync`
+  - `security`
+  - `search.saved_queries`
+  - `restore_profiles`
+- `index.json`
+  - `schema_version`
+  - `rev`
+  - `updated_at`
+  - `search_meta`
+  - `snapshots`
+  - `tombstones`
+- `snapshots/<id>.json`
+  - `schema_version`
+  - `rev`
+  - `updated_at`
+  - `git_state`
+  - optional DPAPI `sensitive` envelope
 
-저장 루트: `%APPDATA%\ctxsnap\`
+## 5. Recent review-driven implementation changes
 
-- `settings.json`: `schema_version=2`, `dev_flags`, `sync`, `security`, `search`, `restore_profiles`
-- `index.json`: `schema_version`, `rev`, `updated_at`, `search_meta`, `snapshots`
-- `snapshots/<id>.json`: `schema_version`, `rev`, `updated_at`, 확장 `git_state`, `sensitive`
-- `sync_conflicts.json`: 동기화 충돌 큐
-- `sync_state.json`: provider/cursor/last_sync 상태
+### 5.1 Secure persistence paths
 
-DPAPI envelope 포맷:
+- Snapshot loading is now effectively split into:
+  - raw persisted snapshot
+  - decrypted UI/search view snapshot
+- Background recent-file updates and metadata-only edits persist through the shared secure save path.
+- This prevents note/TODO/process/app plaintext from being written back accidentally after decryption.
 
-```json
-{"enc":"dpapi","v":1,"blob":"<base64>"}
-```
+### 5.2 Search cache hardening
 
-## 5. 정합성 체크 결과
+- `index.search_blob` no longer stores decrypted sensitive text.
+- Free-text search still works by loading and matching decrypted content in memory when needed.
+- Field queries (`todo:`, `note:`, `process:`, `app:`) continue to use runtime snapshot loading.
 
-### 5.1 문서 ↔ 코드
+### 5.3 Restore and settings corrections
 
-- `README.md/README.en.md`의 기능/설정/저장경로 설명을 최신 구조에 맞춰 갱신 필요(이번 반영)
-- `CLAUDE.md/gpt.md`의 구형 구조(`storage.py`, 단일 main_window 집중) 설명 갱신 필요(이번 반영)
-- `PROJECT_STRUCTURE_ANALYSIS.md` 자체도 최신 상태 기준으로 재작성 필요(이번 반영)
+- `Restore Last` now chooses the newest item by `created_at`, then `updated_at`, then `id`.
+- Restore preview receives the checklist default explicitly instead of forcing it on.
+- `default_root` is now Settings-owned state only; snapshot save/edit no longer rewrites it.
+- `auto_backup_last` and `onboarding_shown` are preserved as local operational metadata during settings import.
 
-### 5.2 빌드 스펙 ↔ 코드
+### 5.4 Sync deletion propagation
 
-- `ctxsnap_win.spec`에 section/dialogs 모듈 hiddenimports가 명시되어 분할 구조에서 빌드 결정성이 개선됨
+- Snapshot deletes now create top-level index tombstones.
+- Sync merges snapshot maps and tombstone maps together.
+- Tombstones are retained for 30 days and prevent stale remote snapshot resurrection.
 
-### 5.3 테스트/CI
+### 5.5 Export UX
 
-- `pytest` 테스트 세트 존재
-- GitHub Actions CI에서 Windows 환경 `pyright` + `pytest` 실행
+- Snapshot export and weekly report export now force an explicit choice between:
+  - `Full export`
+  - `Redacted export`
+- Redacted export removes plaintext sensitive fields and the DPAPI envelope.
 
-## 6. 남은 개선 여지
+## 6. Documentation and packaging alignment
 
-- cloud provider 실연동(`cloud_stub` 대체)
-- 충돌 큐 UI(설정/도구 메뉴에서 직접 조회/해결)
-- 저장 쿼리(`search.saved_queries`) 관리 UX 개선
-- 보안 기능 활성화 시 운영 가이드/오류복구 UX 강화
+- `README.md` and `README.en.md` now describe:
+  - explicit `Default Root`
+  - saved-query dropdown behavior
+  - runtime-only sensitive search matching
+  - tombstone-based sync deletes
+  - `Full export` vs `Redacted export`
+- `CLAUDE.md` and `gpt.md` now reflect the current schema and operational rules.
+- `ctxsnap_win.spec` was re-validated with `python -m PyInstaller ctxsnap_win.spec`; no spec change was required for the new functionality.
 
-## 7. 운영 권장사항
+## 7. Remaining improvement opportunities
 
-- 기능 플래그 기본값은 `false` 유지
-- 파괴적 연산 전 안전 백업 선행
-- 신규 설정 키 추가 시 반드시 `migrate_settings()` 동기화
-- 사용자 노출 문자열은 `tr()` 경유 원칙 유지
+- Cloud sync still uses a stub provider; real remote-provider support remains open.
+- Sync conflict inspection/resolution is recorded but still light on dedicated UI.
+- Export UX could later grow a richer preview/summary dialog.
+- Search presets are quick-apply from the main window, but editing still lives in Settings only.

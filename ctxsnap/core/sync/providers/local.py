@@ -19,7 +19,7 @@ class LocalSyncProvider(SyncProvider):
     def _default_payload(self) -> Dict[str, Any]:
         return {
             "cursor": "",
-            "index": {"snapshots": []},
+            "index": {"snapshots": [], "tombstones": []},
             "snapshots": [],
         }
 
@@ -33,7 +33,7 @@ class LocalSyncProvider(SyncProvider):
                 raise SyncProviderError(f"Failed to read local sync payload: {exc}") from exc
         return SyncPayload(
             cursor=str(payload.get("cursor", "") or ""),
-            index=payload.get("index", {"snapshots": []}) if isinstance(payload.get("index"), dict) else {"snapshots": []},
+            index=payload.get("index", {"snapshots": [], "tombstones": []}) if isinstance(payload.get("index"), dict) else {"snapshots": [], "tombstones": []},
             snapshots=payload.get("snapshots", []) if isinstance(payload.get("snapshots"), list) else [],
         )
 

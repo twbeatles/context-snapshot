@@ -143,16 +143,26 @@ class MainWindowAutomationSection:
                 continue
             if created_at >= cutoff:
                 continue
-            it["archived"] = True
             sid = it.get("id")
             if sid:
-                snap = self.load_snapshot(sid)
+                snap = self.load_snapshot_raw(sid)
                 if snap:
                     snap["archived"] = True
-                    if not save_snapshot_file(self.snap_path(sid), snap):
+                    snap = self.snapshot_service.touch_snapshot(snap)
+                    persisted = self._prepare_snapshot_for_persist(snap)
+                    if not save_snapshot_file(self.snap_path(sid), persisted):
                         LOGGER.warning("Failed to persist archived snapshot: %s", sid)
+                        continue
+                    it.update(
+                        self._index_entry_from_snapshot_data(
+                            persisted,
+                            snap_mtime=snapshot_mtime(self.snap_path(sid)),
+                        )
+                    )
+            it["archived"] = True
             updated = True
         if updated:
+            self.index = self.snapshot_service.touch_index(self.index)
             if not save_json(self.index_path, self.index):
                 LOGGER.warning("Failed to persist archive policy updates.")
 
@@ -255,7 +265,7 @@ class MainWindowAutomationSection:
         thread.start()
 
     def _on_recent_files_ready(self, sid: str, files: List[str]) -> None:
-        snap = self.load_snapshot(sid)
+        snap = self.load_snapshot_raw(sid)
         if not snap:
             return
         prev_snap = copy.deepcopy(snap)
@@ -263,7 +273,8 @@ class MainWindowAutomationSection:
         snap_path = self.snap_path(sid)
         try:
             snap["recent_files"] = files
-            self._save_snapshot_or_raise(snap_path, snap, f"snapshot recent files {sid}")
+            snap = self.snapshot_service.touch_snapshot(snap)
+            snap = self._persist_snapshot_or_raise(snap_path, snap, f"snapshot recent files {sid}")
             snap_mtime = snapshot_mtime(snap_path)
             for it in self.index.get("snapshots", []):
                 if it.get("id") == sid:
@@ -277,7 +288,11 @@ class MainWindowAutomationSection:
             log_exc(f"recent files update ({sid})", exc if isinstance(exc, Exception) else Exception(str(exc)))
             self.index = prev_index
             try:
-                self._save_snapshot_or_raise(snap_path, prev_snap, f"snapshot recent files rollback {sid}")
+                self._save_snapshot_or_raise(
+                    snap_path,
+                    self._prepare_snapshot_for_persist(prev_snap),
+                    f"snapshot recent files rollback {sid}",
+                )
             except Exception as rollback_exc:
                 log_exc("rollback recent files snapshot file", rollback_exc)
             if not save_json(self.index_path, self.index):

@@ -66,15 +66,25 @@ class SearchService:
         root = str(item.get("root", "") or "")
         tags = [str(t).lower() for t in item.get("tags", []) or []]
         base_hay = f"{title} {root} {' '.join(tags)}".lower()
+        sid = str(item.get("id") or "")
+        snap: Optional[Dict[str, Any]] = None
 
-        if parsed.terms and not self._contains_all(base_hay + " " + str(item.get("search_blob", "")).lower(), parsed.terms):
-            return False
+        def ensure_snapshot() -> Optional[Dict[str, Any]]:
+            nonlocal snap
+            if snap is None and load_snapshot and sid:
+                snap = load_snapshot(sid)
+            return snap
+
+        if parsed.terms:
+            cached_hay = base_hay + " " + str(item.get("search_blob", "")).lower()
+            if not self._contains_all(cached_hay, parsed.terms):
+                loaded = ensure_snapshot()
+                runtime_hay = base_hay + " " + self.build_blob_if_missing(item, loaded).lower()
+                if not self._contains_all(runtime_hay, parsed.terms):
+                    return False
 
         if not parsed.fields:
             return True
-
-        sid = str(item.get("id") or "")
-        snap = load_snapshot(sid) if (load_snapshot and sid) else None
 
         for field, values in parsed.fields.items():
             if field == "title":
@@ -88,17 +98,18 @@ class SearchService:
                 if not self._contains_all(joined, values):
                     return False
             elif field in {"todos", "note", "processes", "running_apps"}:
-                if not snap:
+                loaded = ensure_snapshot()
+                if not loaded:
                     return False
                 if field == "todos":
-                    hay = " ".join(str(x).lower() for x in (snap.get("todos", []) or []))
+                    hay = " ".join(str(x).lower() for x in (loaded.get("todos", []) or []))
                 elif field == "note":
-                    hay = str(snap.get("note", "") or "").lower()
+                    hay = str(loaded.get("note", "") or "").lower()
                 elif field == "processes":
-                    procs = snap.get("processes", []) or []
+                    procs = loaded.get("processes", []) or []
                     hay = " ".join(str(p.get("name", "")).lower() + " " + str(p.get("exe", "")).lower() for p in procs if isinstance(p, dict))
                 else:
-                    apps = snap.get("running_apps", []) or []
+                    apps = loaded.get("running_apps", []) or []
                     hay = " ".join(str(a.get("name", "")).lower() + " " + str(a.get("exe", "")).lower() for a in apps if isinstance(a, dict))
                 if not self._contains_all(hay, values):
                     return False

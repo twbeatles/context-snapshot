@@ -100,13 +100,23 @@ context-snapshot/
 
 - `settings.schema_version=2`
 - `settings.dev_flags`: `sync_enabled`, `security_enabled`, `advanced_search_enabled`, `restore_profiles_enabled`
+- `settings.default_root`: 자동화 기준 루트, Settings에서만 변경
 - `settings.sync`: `provider`, `local_root`, `auto_interval_min`, `last_cursor`
 - `settings.security`: `dpapi_enabled`, `encrypt_*`
 - `settings.search`: `enable_field_query`, `saved_queries`
 - `settings.restore_profiles`: 복원 프리셋 목록
+- `index.tombstones`: 삭제 전파용 tombstone 목록(`id`, `deleted_at`), 30일 유지
 - `snapshot.schema_version=2`, `rev`, `updated_at`
 - `snapshot.git_state`: `branch`, `sha`, `dirty`, `changed`, `staged`, `untracked`
 - `snapshot.sensitive`: DPAPI envelope (`enc=dpapi`, `v`, `blob`)
+
+운영 규칙:
+
+- DPAPI 스냅샷의 복호화된 민감 텍스트는 `index.search_blob`에 저장하지 않는다.
+- 메타 수정/자동 보관/최근 파일 백그라운드 갱신은 raw snapshot 기준으로 저장해서 민감 평문이 다시 파일에 쓰이지 않게 한다.
+- 복호화 실패 시 `_security_error`를 유지하고 UI(상세 패널, 복원 미리보기)에서 경고를 표시한다.
+- 스냅샷 export/주간 보고서는 민감 데이터가 있으면 `Full export` 또는 `Redacted export`를 먼저 선택해야 한다.
+- 메인 검색창 옆 드롭다운은 `settings.search.saved_queries`를 바로 적용하는 읽기 전용 진입점이다.
 
 ## 기능 플래그
 

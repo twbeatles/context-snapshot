@@ -29,7 +29,8 @@ class MainWindowSettingsBackupSection:
         vals = migrate_settings(vals)
         vals["restore_profiles"] = self.restore_service.normalize_profiles(vals.get("restore_profiles", []))
         vals.setdefault("default_root", self.settings.get("default_root", str(Path.home())))
-        vals.setdefault("onboarding_shown", self.settings.get("onboarding_shown", False))
+        vals["auto_backup_last"] = str(vals.get("auto_backup_last", self.settings.get("auto_backup_last", "")) or "")
+        vals["onboarding_shown"] = bool(vals.get("onboarding_shown", self.settings.get("onboarding_shown", False)))
         self.settings = vals
         if save:
             if not save_json(self.settings_path, self.settings):
@@ -42,6 +43,8 @@ class MainWindowSettingsBackupSection:
                 return False
 
         self._build_tag_menu()
+        if hasattr(self, "_refresh_saved_query_combo"):
+            self._refresh_saved_query_combo()
         self._reset_pagination_and_refresh()
 
         if hasattr(self, "btn_quick"):
@@ -131,7 +134,7 @@ class MainWindowSettingsBackupSection:
                 if strategy == "replace":
                     for f in self.snaps_dir.glob("*.json"):
                         f.unlink(missing_ok=True)
-                    self.index = {"snapshots": []}
+                    self.index = self.snapshot_service.migrate_index({"snapshots": [], "tombstones": []})
 
                 existing_ids = {str(it.get("id")) for it in self.index.get("snapshots", []) if it.get("id")}
 
@@ -158,8 +161,12 @@ class MainWindowSettingsBackupSection:
                                 it.update(entry)
                                 break
 
+                imported_tombstones = []
+                if imported_index:
+                    imported_tombstones = self.snapshot_service.normalize_tombstones(imported_index.get("tombstones", []))
+
                 if imported_index and strategy in ("overwrite", "replace"):
-                    migrated_index = {"snapshots": []}
+                    migrated_index = self.snapshot_service.migrate_index({"snapshots": [], "tombstones": imported_tombstones})
                     for raw_item in imported_index.get("snapshots", []):
                         if not isinstance(raw_item, dict):
                             continue
@@ -177,6 +184,18 @@ class MainWindowSettingsBackupSection:
                             item["git_state"] = {}
                         migrated_index["snapshots"].append(item)
                     self.index = migrated_index
+                elif imported_tombstones:
+                    merged_tombstones = {
+                        item["id"]: item["deleted_at"]
+                        for item in self.snapshot_service.normalize_tombstones(self.index.get("tombstones", []))
+                    }
+                    for item in imported_tombstones:
+                        previous = merged_tombstones.get(item["id"], "")
+                        if item["deleted_at"] > previous:
+                            merged_tombstones[item["id"]] = item["deleted_at"]
+                    self.index["tombstones"] = self.snapshot_service.normalize_tombstones(
+                        [{"id": sid, "deleted_at": deleted_at} for sid, deleted_at in merged_tombstones.items()]
+                    )
 
                 seen = set()
                 dedup = []
@@ -187,11 +206,29 @@ class MainWindowSettingsBackupSection:
                     seen.add(sid)
                     dedup.append(it)
                 self.index["snapshots"] = dedup
+                tombstone_map = {
+                    item["id"]: item["deleted_at"]
+                    for item in self.snapshot_service.normalize_tombstones(self.index.get("tombstones", []))
+                }
+                kept_snapshots = []
+                for item in self.index.get("snapshots", []):
+                    sid = str(item.get("id") or "")
+                    deleted_at = tombstone_map.get(sid, "")
+                    snapshot_stamp = self.snapshot_service.snapshot_timestamp(item)
+                    if deleted_at and deleted_at >= snapshot_stamp:
+                        (self.snaps_dir / f"{sid}.json").unlink(missing_ok=True)
+                        continue
+                    kept_snapshots.append(item)
+                self.index["snapshots"] = kept_snapshots
                 self.index = self.snapshot_service.touch_index(self.index)
                 self._save_json_or_raise(self.index_path, self.index, "index after import")
                 self._reset_pagination_and_refresh()
 
-            if not self.apply_settings(payload.get("settings", {}), save=True):
+            imported_settings = migrate_settings(payload.get("settings", {}))
+            imported_settings["default_root"] = prev_settings.get("default_root", str(Path.home()))
+            imported_settings["auto_backup_last"] = prev_settings.get("auto_backup_last", "")
+            imported_settings["onboarding_shown"] = prev_settings.get("onboarding_shown", False)
+            if not self.apply_settings(imported_settings, save=True):
                 raise RuntimeError("Failed to apply imported settings.")
             return True
 

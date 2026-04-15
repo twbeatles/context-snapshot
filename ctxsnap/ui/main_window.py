@@ -72,6 +72,30 @@ class MainWindow(
         parts.append(str(hk.get("vk", "S")).upper())
         return "+".join(parts)
 
+    def _refresh_saved_query_combo(self) -> None:
+        if not hasattr(self, "saved_query_combo"):
+            return
+        queries = self.settings.get("search", {}).get("saved_queries", [])
+        combo = self.saved_query_combo
+        current_text = self.search.text() if hasattr(self, "search") else ""
+        with QtCore.QSignalBlocker(combo):
+            combo.clear()
+            combo.addItem(tr("Saved Queries"), "")
+            for query in queries:
+                label = str(query).strip()
+                if label:
+                    combo.addItem(label, label)
+            match_index = combo.findData(current_text)
+            combo.setCurrentIndex(match_index if match_index >= 0 else 0)
+
+    def _apply_saved_query_choice(self, row: int) -> None:
+        if row <= 0:
+            return
+        query = str(self.saved_query_combo.itemData(row) or "").strip()
+        if query:
+            self.search.setText(query)
+            self.search.setFocus()
+
     def _build_menus(self) -> None:
         """Menu bar for a more discoverable UX."""
         mb = self.menuBar()
@@ -162,7 +186,8 @@ class MainWindow(
 
         # Storage & Settings
         self.snaps_dir, self.index_path, self.settings_path = ensure_storage()
-        self.index = self.snapshot_service.migrate_index(load_json(self.index_path))
+        raw_index = load_json(self.index_path)
+        self.index = self.snapshot_service.migrate_index(raw_index)
         self.settings = migrate_settings(load_json(self.settings_path))
         self.settings["restore_profiles"] = self.restore_service.normalize_profiles(
             self.settings.get("restore_profiles", [])
@@ -174,7 +199,7 @@ class MainWindow(
         self._build_menus()
 
         # Migrate index entries
-        changed = False
+        changed = self.index != raw_index
         for it in self.index.get("snapshots", []):
             if "tags" not in it:
                 it["tags"] = []
@@ -206,10 +231,18 @@ class MainWindow(
             if "updated_at" not in it:
                 it["updated_at"] = it.get("created_at", now_iso())
                 changed = True
+            if "search_blob" not in it:
+                it["search_blob"] = ""
+                changed = True
+            if "search_blob_mtime" not in it:
+                it["search_blob_mtime"] = 0.0
+                changed = True
         
         if "schema_version" not in self.index:
             changed = True
         if "search_meta" not in self.index:
+            changed = True
+        if "tombstones" not in self.index:
             changed = True
         if "rev" not in self.index:
             changed = True
@@ -230,6 +263,10 @@ class MainWindow(
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText(tr("Search placeholder"))
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
+        self.search.textChanged.connect(lambda _text: self._refresh_saved_query_combo())
+        self.saved_query_combo = NoScrollComboBox()
+        self.saved_query_combo.currentIndexChanged.connect(self._apply_saved_query_choice)
+        self._refresh_saved_query_combo()
         self.search_btn_clear = QtWidgets.QToolButton()
         self.search_btn_clear.setText(tr("Clear"))
         self.search_btn_clear.clicked.connect(self._clear_search)
@@ -352,6 +389,7 @@ class MainWindow(
         search_row = QtWidgets.QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self.search, 1)
+        search_row.addWidget(self.saved_query_combo)
         search_row.addWidget(self.search_btn_clear)
         search_row.addWidget(self.tag_filter_btn)
         
@@ -508,22 +546,7 @@ class MainWindow(
         QtGui.QShortcut(QtGui.QKeySequence("Escape"), self).activated.connect(self._clear_search)
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self, self.settings, index_path=self.index_path, snaps_dir=self.snaps_dir)
-        dlg.settingsImported.connect(self.apply_imported_backup)
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-
-        vals = dlg.values()
-        payload = dlg.imported_payload()
-
-        if payload and not dlg.import_apply_now():
-            if not self.apply_imported_backup(payload):
-                return
-        else:
-            if not self.apply_settings(vals, save=True):
-                return
-
-        self.statusBar().showMessage("Settings applied.", 2500)
+        MainWindowSettingsBackupSection.open_settings(self)
 
     def open_selected_root(self) -> None:
         sid = self.selected_id()
@@ -547,55 +570,10 @@ class MainWindow(
             QtWidgets.QMessageBox.information(self, tr("VSCode not found title"), msg or tr("VSCode command missing"))
 
     def export_selected_snapshot(self) -> None:
-        sid = self.selected_id()
-        if not sid:
-            return
-        snap = self.load_snapshot(sid)
-        if not snap:
-            return
-        default_name = f"snapshot_{sid}.json"
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export snapshot", str(Path.home() / default_name), "JSON files (*.json)"
-        )
-        if not path:
-            return
-        if save_snapshot_file(Path(path), snap):
-            self.statusBar().showMessage("Snapshot exported.", 2500)
-        else:
-            QtWidgets.QMessageBox.warning(self, tr("Error"), "Failed to export snapshot.")
+        MainWindowRestoreActionsSection.export_selected_snapshot(self)
 
     def export_weekly_report(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export weekly report", str(Path.home() / "ctxsnap_weekly_report.md"), "Markdown files (*.md)"
-        )
-        if not path:
-            return
-        cutoff = datetime.now() - timedelta(days=7)
-        lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
-        for it in self.index.get("snapshots", []):
-            created_at = safe_parse_datetime(it.get("created_at", ""))
-            if not created_at:
-                continue
-            if created_at < cutoff:
-                continue
-            snap = self.load_snapshot(it.get("id", "")) or {}
-            lines.append(f"## {snap.get('title','(no title)')}")
-            lines.append(f"- Created: {snap.get('created_at','')}")
-            lines.append(f"- Root: {snap.get('root','')}")
-            tags = snap.get("tags", [])
-            if tags:
-                lines.append(f"- Tags: {', '.join(tags)}")
-            todos = [t for t in snap.get("todos", []) if t]
-            if todos:
-                lines.append("### TODOs")
-                lines.extend([f"- {t}" for t in todos])
-            note = snap.get("note", "")
-            if note:
-                lines.append("### Note")
-                lines.append(note)
-            lines.append("")
-        Path(path).write_text("\n".join(lines), encoding="utf-8")
-        self.statusBar().showMessage("Weekly report exported.", 2500)
+        MainWindowRestoreActionsSection.export_weekly_report(self)
 
     def open_compare_dialog(self) -> None:
         snapshots = [s for s in self.index.get("snapshots", []) if s.get("id")]

@@ -95,3 +95,79 @@ def test_sync_records_conflict_for_same_rev_and_timestamp(tmp_path: Path) -> Non
     assert result["conflict_count"] == 1
     conflicts = json.loads((base / "sync_conflicts.json").read_text(encoding="utf-8"))
     assert conflicts["conflicts"][0]["snapshot_id"] == "s1"
+
+
+def test_sync_applies_remote_tombstone_and_removes_local_snapshot(tmp_path: Path) -> None:
+    base = tmp_path / "local"
+    snaps = base / "snapshots"
+    snaps.mkdir(parents=True, exist_ok=True)
+    index_path = base / "index.json"
+    save_json(
+        index_path,
+        {
+            "snapshots": [],
+            "tombstones": [],
+            "schema_version": 2,
+            "rev": 1,
+            "updated_at": "2026-01-01T00:00:00",
+            "search_meta": {},
+        },
+    )
+
+    _write_snapshot(snaps, "s1", "local-old", 1, "2026-01-01T00:00:00")
+
+    remote_root = tmp_path / "remote"
+    provider = LocalSyncProvider(remote_root)
+    payload = {
+        "cursor": "",
+        "index": {"snapshots": [], "tombstones": [{"id": "s1", "deleted_at": "2026-04-10T00:00:00"}]},
+        "snapshots": [],
+    }
+    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    engine = SyncEngine(
+        provider=provider,
+        local_index_path=index_path,
+        local_snaps_dir=snaps,
+        conflicts_path=base / "sync_conflicts.json",
+        state_path=base / "sync_state.json",
+    )
+    result = engine.sync()
+    assert result["snapshot_count"] == 0
+    assert not (snaps / "s1.json").exists()
+    merged_index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert merged_index["tombstones"] == [{"id": "s1", "deleted_at": "2026-04-10T00:00:00"}]
+
+
+def test_sync_prunes_old_tombstones(tmp_path: Path) -> None:
+    base = tmp_path / "local"
+    snaps = base / "snapshots"
+    snaps.mkdir(parents=True, exist_ok=True)
+    index_path = base / "index.json"
+    save_json(
+        index_path,
+        {
+            "snapshots": [],
+            "tombstones": [{"id": "s1", "deleted_at": "2026-01-01T00:00:00"}],
+            "schema_version": 2,
+            "rev": 1,
+            "updated_at": "2026-02-15T00:00:00",
+            "search_meta": {},
+        },
+    )
+
+    remote_root = tmp_path / "remote"
+    provider = LocalSyncProvider(remote_root)
+    payload = {"cursor": "", "index": {"snapshots": [], "tombstones": []}, "snapshots": []}
+    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    engine = SyncEngine(
+        provider=provider,
+        local_index_path=index_path,
+        local_snaps_dir=snaps,
+        conflicts_path=base / "sync_conflicts.json",
+        state_path=base / "sync_state.json",
+    )
+    engine.sync()
+    merged_index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert merged_index["tombstones"] == []
