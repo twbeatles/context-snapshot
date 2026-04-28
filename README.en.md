@@ -166,6 +166,8 @@ Use tags to categorize your snapshots.
 - Real Estate
 - Settlement
 
+When new settings are created or reset under Korean, the default tags are `업무`, `개인`, `부동산`, and `정산`. Existing custom tags are not overwritten during migration.
+
 **Adding Custom Tags:**
 1. Settings → Tags tab
 2. Enter new tag name
@@ -235,7 +237,7 @@ Automatically create snapshots without manual saving.
 **Git Change Detection:**
 1. Settings → General tab
 2. Check **Auto snapshot on Git change**
-3. Auto-saves when Git status (branch, commit, etc.) changes (headless, no dialog)
+3. Auto-saves when Git status changes, including branch, commit, dirty, staged, and untracked counts (headless, no dialog)
 
 **Auto-save deduplication:**
 - If the core context (root/workspace/note/TODO/tags/Git state) has not changed, auto snapshot is skipped.
@@ -302,6 +304,7 @@ Backup your settings and snapshot data.
 2. Click **Import Backup**
 3. Select backup file
 4. Choose `Apply now` for immediate apply, or `Keep in dialog` to apply on Save.
+5. If the backup `Default Root` differs from the current PC value, choose whether to apply the imported value or keep the current one.
 
 ---
 
@@ -358,8 +361,10 @@ CtxSnap resides in the system tray.
 - Saved queries can be applied directly from the dropdown next to the main search box.
 - DPAPI-protected snapshots no longer write decrypted sensitive text into `index.json` `search_blob`. Free-text search falls back to runtime decryption only.
 - When decryption fails, the detail panel and restore preview show a warning instead of failing silently.
+- After enabling security, use Settings > Security > `Encrypt existing snapshots` to manually encrypt existing plaintext snapshots. A safety backup is created first.
 - Snapshot deletion propagates through sync via a `30-day tombstone`, preventing stale remote copies from being resurrected.
-- `Export Selected Snapshot` and `Export Weekly Report` now require choosing `Full export` or `Redacted export` whenever sensitive data is present or decryption has failed.
+- `Export Selected Snapshot` and `Export Weekly Report` now require choosing `Full export` or `Redacted export` whenever sensitive data is present or decryption has failed. `Redacted export` removes note/TODO/process/app data plus root, workspace, recent files, and Git state.
+- Sync conflicts preserve both local and remote payloads in `sync_conflicts.json` and can be inspected from Tools > Sync Conflicts. Remote changes are not automatically overwritten by the local winner when a conflict is detected.
 
 ### Restore Tab
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from ctxsnap.app_storage import migrate_settings, migrate_snapshot
+import pytest
+
+from ctxsnap.app_storage import migrate_settings, migrate_snapshot, safe_snapshot_path
+from ctxsnap.constants import default_tags_for_language
 from ctxsnap.services.snapshot_service import SnapshotService
 
 
@@ -14,6 +17,19 @@ def test_migrate_settings_adds_new_schema_and_feature_flags() -> None:
     assert settings["search"]["enable_field_query"] is True
     assert isinstance(settings["restore_profiles"], list)
     assert settings["capture_enforce_todos"] is True
+
+
+def test_default_tags_follow_language_without_overwriting_existing_tags() -> None:
+    assert default_tags_for_language("en") == ["Work", "Personal", "Real Estate", "Settlement"]
+    assert default_tags_for_language("ko") == ["업무", "개인", "부동산", "정산"]
+    assert migrate_settings({"language": "en"})["tags"] == ["Work", "Personal", "Real Estate", "Settlement"]
+    assert migrate_settings({"language": "en", "tags": ["custom"]})["tags"] == ["custom"]
+
+
+@pytest.mark.parametrize("sid", ["../x", "a/b", r"a\b", "C:escape", ""])
+def test_safe_snapshot_path_rejects_unsafe_ids(tmp_path, sid: str) -> None:
+    with pytest.raises(ValueError):
+        safe_snapshot_path(tmp_path, sid)
 
 
 def test_migrate_snapshot_backfills_revision_and_git_state() -> None:

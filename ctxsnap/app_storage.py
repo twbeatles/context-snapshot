@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ctxsnap.constants import APP_NAME, DEFAULT_PROCESS_KEYWORDS, DEFAULT_TAGS
+from ctxsnap.constants import APP_NAME, DEFAULT_PROCESS_KEYWORDS, default_tags_for_language
 from ctxsnap.core.security import SecurityService
 
 LOGGER = logging.getLogger(APP_NAME)
+SNAPSHOT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 @dataclass
@@ -52,6 +54,25 @@ def now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def is_valid_snapshot_id(sid: str) -> bool:
+    raw = str(sid or "").strip()
+    return bool(SNAPSHOT_ID_PATTERN.fullmatch(raw))
+
+
+def safe_snapshot_path(snaps_dir: Path, sid: str) -> Path:
+    """Return a snapshot path after validating id and directory containment."""
+    raw = str(sid or "").strip()
+    if not is_valid_snapshot_id(raw):
+        raise ValueError(f"Invalid snapshot id: {raw!r}")
+    base = snaps_dir.resolve()
+    target = (base / f"{raw}.json").resolve()
+    try:
+        target.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Snapshot path escapes snapshots directory: {raw!r}") from exc
+    return target
+
+
 def _default_index() -> Dict[str, Any]:
     return {
         "schema_version": 2,
@@ -69,7 +90,7 @@ def _default_settings() -> Dict[str, Any]:
         "default_root": str(Path.home()),
         "recent_files_limit": 30,
         "restore_preview_default": True,
-        "tags": DEFAULT_TAGS,
+        "tags": default_tags_for_language("auto"),
         "hotkey": {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"},
         "capture": {"recent_files": True, "processes": True, "running_apps": True},
         "capture_note": True,
@@ -283,7 +304,8 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("default_root", str(Path.home()))
     settings.setdefault("recent_files_limit", 30)
     settings.setdefault("restore_preview_default", True)
-    settings.setdefault("tags", DEFAULT_TAGS)
+    settings.setdefault("language", "auto")
+    settings.setdefault("tags", default_tags_for_language(str(settings.get("language", "auto"))))
 
     hotkey = settings.setdefault("hotkey", {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"})
     if not isinstance(hotkey, dict):
@@ -321,7 +343,6 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("capture_enforce_todos", True)
     settings.setdefault("auto_snapshot_minutes", 0)
     settings.setdefault("auto_snapshot_on_git_change", False)
-    settings.setdefault("language", "auto")
 
     restore = settings.setdefault(
         "restore",

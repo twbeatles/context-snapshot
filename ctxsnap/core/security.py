@@ -132,6 +132,7 @@ class SecurityService:
     def encrypt_snapshot_sensitive_fields(self, snap: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
         """Return a new snapshot dict with configured sensitive fields encrypted into `sensitive`."""
         out = deepcopy(snap)
+        existing_envelope = deepcopy(out.get("sensitive")) if isinstance(out.get("sensitive"), dict) else None
         out.pop("_security_error", None)
         out.pop("sensitive", None)
         if not self._security_enabled(settings):
@@ -155,6 +156,8 @@ class SecurityService:
 
         if sensitive:
             out["sensitive"] = self.encrypt_payload(sensitive)
+        elif existing_envelope:
+            out["sensitive"] = existing_envelope
         return out
 
     def decrypt_snapshot_sensitive_fields(self, snap: Dict[str, Any]) -> Dict[str, Any]:

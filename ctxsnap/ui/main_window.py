@@ -134,6 +134,8 @@ class MainWindow(
         a_compare.triggered.connect(self.open_compare_dialog)
         a_history = QtGui.QAction(tr("Open Restore History"), self)
         a_history.triggered.connect(self.open_restore_history)
+        a_conflicts = QtGui.QAction(tr("Open Sync Conflicts"), self)
+        a_conflicts.triggered.connect(self.open_sync_conflicts)
         m_tools.addAction(a_settings)
         m_tools.addAction(a_sync)
         m_tools.addSeparator()
@@ -142,6 +144,7 @@ class MainWindow(
         m_tools.addAction(a_compare)
         m_tools.addSeparator()
         m_tools.addAction(a_history)
+        m_tools.addAction(a_conflicts)
 
         m_help = mb.addMenu(tr("Help"))
         a_onb = QtGui.QAction(tr("Onboarding") + "…", self)
@@ -549,25 +552,10 @@ class MainWindow(
         MainWindowSettingsBackupSection.open_settings(self)
 
     def open_selected_root(self) -> None:
-        sid = self.selected_id()
-        if not sid:
-            return
-        snap = self.load_snapshot(sid)
-        if not snap:
-            return
-        open_folder(Path(snap["root"]))
+        MainWindowRestoreActionsSection.open_selected_root(self)
 
     def open_selected_vscode(self) -> None:
-        sid = self.selected_id()
-        if not sid:
-            return
-        snap = self.load_snapshot(sid)
-        if not snap:
-            return
-        target = resolve_vscode_target(snap)
-        success, msg = open_vscode_at(target)
-        if not success:
-            QtWidgets.QMessageBox.information(self, tr("VSCode not found title"), msg or tr("VSCode command missing"))
+        MainWindowRestoreActionsSection.open_selected_vscode(self)
 
     def export_selected_snapshot(self) -> None:
         MainWindowRestoreActionsSection.export_selected_snapshot(self)
@@ -576,21 +564,7 @@ class MainWindow(
         MainWindowRestoreActionsSection.export_weekly_report(self)
 
     def open_compare_dialog(self) -> None:
-        snapshots = [s for s in self.index.get("snapshots", []) if s.get("id")]
-        if len(snapshots) < 2:
-            QtWidgets.QMessageBox.information(self, tr("Compare"), tr("Need at least two snapshots to compare"))
-            return
-        dlg = CompareDialog(self, snapshots, loader=self.load_snapshot)
-        dlg.exec()
+        MainWindowRestoreActionsSection.open_compare_dialog(self)
 
     def open_restore_history(self) -> None:
-        history_path = app_dir() / "restore_history.json"
-        if not history_path.exists():
-            QtWidgets.QMessageBox.information(self, tr("Restore History"), tr("No restore history yet"))
-            return
-        try:
-            history = json.loads(history_path.read_text(encoding="utf-8"))
-        except Exception:
-            history = {"restores": []}
-        dlg = RestoreHistoryDialog(self, history)
-        dlg.exec()
+        MainWindowRestoreActionsSection.open_restore_history(self)

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtCore, QtWidgets
 
-from ctxsnap.app_storage import Snapshot, gen_id, migrate_snapshot, now_iso, save_json, save_snapshot_file
+from ctxsnap.app_storage import Snapshot, gen_id, migrate_snapshot, now_iso, safe_snapshot_path, save_json, save_snapshot_file
 from ctxsnap.constants import DEFAULT_TAGS
 from ctxsnap.core.logging import get_logger
 from ctxsnap.i18n import tr
@@ -37,7 +37,7 @@ class MainWindowSnapshotCrudSection:
         return cast(QtWidgets.QWidget, instance)
 
     def snap_path(self, sid: str) -> Path:
-        return self.snaps_dir / f"{sid}.json"
+        return safe_snapshot_path(self.snaps_dir, sid)
 
     def _save_json_or_raise(self, path: Path, data: Dict[str, Any], label: str) -> None:
         if not save_json(path, data):
@@ -181,10 +181,10 @@ class MainWindowSnapshotCrudSection:
         return False
 
     def load_snapshot_raw(self, sid: str) -> Optional[Dict[str, Any]]:
-        p = self.snap_path(sid)
-        if not p.exists():
-            return None
         try:
+            p = self.snap_path(sid)
+            if not p.exists():
+                return None
             return migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, Exception) as e:
             log_exc(f"load snapshot {sid}", e)
@@ -340,7 +340,9 @@ class MainWindowSnapshotCrudSection:
             snap,
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
-            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+            enforce_todos=bool(self.settings.get("capture_todos", True))
+            and bool(self.settings.get("capture_enforce_todos", True)),
+            todos_enabled=bool(self.settings.get("capture_todos", True)),
         )
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
@@ -425,7 +427,9 @@ class MainWindowSnapshotCrudSection:
             self.settings.get("default_root", str(Path.home())),
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
-            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+            enforce_todos=bool(self.settings.get("capture_todos", True))
+            and bool(self.settings.get("capture_enforce_todos", True)),
+            todos_enabled=bool(self.settings.get("capture_todos", True)),
         )
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
@@ -433,12 +437,21 @@ class MainWindowSnapshotCrudSection:
         self._create_snapshot(v["root"], v["title"], v["workspace"], v["note"], v["todos"], v["tags"])
 
     def quick_snapshot(self) -> None:
+        seed = None
+        latest = self.snapshot_service.latest_snapshot_item(self.index.get("snapshots", []))
+        if latest and latest.get("id"):
+            seed = self.load_snapshot(str(latest.get("id")))
+        default_root = str(seed.get("root") or self.settings.get("default_root", str(Path.home()))) if seed else self.settings.get("default_root", str(Path.home()))
+        selected_tags = list(seed.get("tags", [])) if seed else []
         dlg = SnapshotDialog(
             self._parent_widget(self),
-            self.settings.get("default_root", str(Path.home())),
+            default_root,
             self.settings.get("tags", DEFAULT_TAGS),
             self.settings.get("templates", []),
-            enforce_todos=bool(self.settings.get("capture_enforce_todos", True)),
+            enforce_todos=bool(self.settings.get("capture_todos", True))
+            and bool(self.settings.get("capture_enforce_todos", True)),
+            selected_tags=selected_tags,
+            todos_enabled=bool(self.settings.get("capture_todos", True)),
         )
         dlg.setWindowTitle(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
 

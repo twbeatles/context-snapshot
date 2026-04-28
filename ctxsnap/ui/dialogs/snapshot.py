@@ -17,6 +17,8 @@ class SnapshotDialog(QtWidgets.QDialog):
         available_tags: List[str],
         templates: List[Dict[str, Any]],
         enforce_todos: bool = True,
+        selected_tags: Optional[List[str]] = None,
+        todos_enabled: bool = True,
     ):
         super().__init__(parent)
         self.setWindowTitle(tr("New Snapshot"))
@@ -26,6 +28,8 @@ class SnapshotDialog(QtWidgets.QDialog):
         self._imported_payload = None
         self._import_apply_now = False
         self.enforce_todos = enforce_todos
+        self.todos_enabled = todos_enabled
+        selected_tag_set = {str(tag) for tag in (selected_tags or [])}
 
         self.root_edit = QtWidgets.QLineEdit(default_root)
         self.title_edit = QtWidgets.QLineEdit()
@@ -50,7 +54,13 @@ class SnapshotDialog(QtWidgets.QDialog):
         for t in available_tags:
             it = QtWidgets.QListWidgetItem(t)
             it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            it.setCheckState(QtCore.Qt.CheckState.Unchecked)
+            it.setCheckState(QtCore.Qt.CheckState.Checked if t in selected_tag_set else QtCore.Qt.CheckState.Unchecked)
+            self.tags_list.addItem(it)
+            selected_tag_set.discard(t)
+        for t in sorted(selected_tag_set):
+            it = QtWidgets.QListWidgetItem(t)
+            it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.CheckState.Checked)
             self.tags_list.addItem(it)
 
         self.custom_tag = QtWidgets.QLineEdit()
@@ -62,6 +72,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         self.todo3 = QtWidgets.QLineEdit()
         for t in (self.todo1, self.todo2, self.todo3):
             t.setPlaceholderText(tr("Required TODO"))
+            t.setEnabled(todos_enabled)
         self.title_edit.setPlaceholderText(tr("Title placeholder"))
         self.note_edit.setPlaceholderText(tr("Note placeholder"))
 
@@ -105,6 +116,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         tags_layout.addWidget(self.custom_tag)
 
         todo_box = QtWidgets.QGroupBox(tr("Next actions (3 required)"))
+        todo_box.setEnabled(todos_enabled)
         todo_layout = QtWidgets.QVBoxLayout(todo_box)
         todo_layout.addWidget(self.todo1)
         todo_layout.addWidget(self.todo2)
@@ -194,7 +206,7 @@ class SnapshotDialog(QtWidgets.QDialog):
         
         # TODOS validation
         todos = [self.todo1.text().strip(), self.todo2.text().strip(), self.todo3.text().strip()]
-        if self.enforce_todos:
+        if self.todos_enabled and self.enforce_todos:
             if any(not t for t in todos):
                 self.err.setText(tr("Todos required"))
                 return
@@ -216,6 +228,8 @@ class SnapshotDialog(QtWidgets.QDialog):
             # fallback suggestion logic if empty
             sug = git_title_suggestion(Path(root))
             title = sug or f"{Path(root).name} - {datetime.now().strftime('%m/%d %H:%M')}"
+        if not self.todos_enabled:
+            todos = ["", "", ""]
         return {"root": root, "title": title, "workspace": workspace, "note": note, "todos": todos, "tags": tags}
 
     def apply_template(self):
@@ -253,6 +267,8 @@ class EditSnapshotDialog(SnapshotDialog):
         available_tags: List[str],
         templates: List[Dict[str, Any]],
         enforce_todos: bool = True,
+        selected_tags: Optional[List[str]] = None,
+        todos_enabled: bool = True,
     ):
         super().__init__(
             parent,
@@ -260,6 +276,8 @@ class EditSnapshotDialog(SnapshotDialog):
             available_tags,
             templates,
             enforce_todos=enforce_todos,
+            selected_tags=selected_tags,
+            todos_enabled=todos_enabled,
         )
         self.setWindowTitle(tr("Edit Snapshot"))
         self._snapshot_id = snapshot.get("id", "")

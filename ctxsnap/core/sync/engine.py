@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ctxsnap.app_storage import load_json, migrate_snapshot, now_iso, save_json, save_snapshot_file
+from ctxsnap.app_storage import is_valid_snapshot_id, load_json, migrate_snapshot, now_iso, safe_snapshot_path, save_json, save_snapshot_file
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.sync.base import SyncConflict, SyncPayload, SyncProvider, snapshot_sort_key
 from ctxsnap.services.snapshot_service import SnapshotService
@@ -80,7 +80,8 @@ class SyncEngine:
                 LOGGER.warning("sync_pull skip corrupted local snapshot %s: %s", p.name, exc)
                 continue
             sid = str(snap.get("id") or "").strip()
-            if not sid:
+            if not is_valid_snapshot_id(sid):
+                LOGGER.warning("sync_pull skip snapshot with invalid local id: %s", sid)
                 continue
             snaps[sid] = snap
         return snaps
@@ -93,7 +94,8 @@ class SyncEngine:
                 continue
             snap = migrate_snapshot(dict(raw))
             sid = str(snap.get("id") or "").strip()
-            if not sid:
+            if not is_valid_snapshot_id(sid):
+                LOGGER.warning("sync_pull skip snapshot with invalid remote id: %s", sid)
                 continue
             out[sid] = snap
         return out
@@ -132,6 +134,8 @@ class SyncEngine:
             remote_rev=int((remote or {}).get("rev", 0) or 0),
             local_updated_at=str((local or {}).get("updated_at", "") or ""),
             remote_updated_at=str((remote or {}).get("updated_at", "") or ""),
+            local_payload=copy.deepcopy(local) if local else None,
+            remote_payload=copy.deepcopy(remote) if remote else None,
         )
         # deterministic fallback: prefer local
         return local, conflict
@@ -147,7 +151,7 @@ class SyncEngine:
                 continue
             sid = str(item.get("id") or "").strip()
             deleted_at = str(item.get("deleted_at") or "").strip()
-            if not sid or not deleted_at:
+            if not is_valid_snapshot_id(sid) or not deleted_at:
                 continue
             previous = merged.get(sid, "")
             if deleted_at > previous:
@@ -174,6 +178,8 @@ class SyncEngine:
                     "remote_rev": c.remote_rev,
                     "local_updated_at": c.local_updated_at,
                     "remote_updated_at": c.remote_updated_at,
+                    "local_payload": c.local_payload,
+                    "remote_payload": c.remote_payload,
                 },
             )
         history["conflicts"] = items[:500]
@@ -224,7 +230,7 @@ class SyncEngine:
             except Exception as exc:
                 LOGGER.warning("sync cleanup failed for %s: %s", path.name, exc)
         for sid, snap in merged.items():
-            save_snapshot_file(self.local_snaps_dir / f"{sid}.json", snap)
+            save_snapshot_file(safe_snapshot_path(self.local_snaps_dir, sid), snap)
 
         local_index_map = local_index if isinstance(local_index, dict) else {}
         merged_index: Dict[str, Any] = copy.deepcopy(local_index_map)
@@ -239,10 +245,21 @@ class SyncEngine:
         merged_index = self.snapshot_service.migrate_index(merged_index)
         save_json(self.local_index_path, merged_index)
 
+        push_map = dict(merged)
+        for conflict in conflicts:
+            if conflict.remote_payload:
+                push_map[conflict.snapshot_id] = conflict.remote_payload
+        push_index = copy.deepcopy(merged_index)
+        push_index["snapshots"] = [
+            self._entry_from_snapshot(s)
+            for _, s in sorted(push_map.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+        ]
+        push_index = self.snapshot_service.migrate_index(push_index)
+
         payload = SyncPayload(
             cursor=remote.cursor,
-            index=merged_index,
-            snapshots=list(merged.values()),
+            index=push_index,
+            snapshots=list(push_map.values()),
         )
         LOGGER.info("sync_push provider=%s", self.provider.name)
         cursor = self.provider.push(payload)

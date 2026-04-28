@@ -340,11 +340,10 @@ def git_title_suggestion(root: Path) -> Optional[str]:
     git = shutil.which("git")
     if not git:
         return None
-    if not (root / ".git").exists():
-        return None
     try:
-        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
-        subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True).strip()
+        subprocess.check_output([git, "-C", str(root), "rev-parse", "--show-toplevel"], text=True, timeout=5)
+        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, timeout=5).strip()
+        subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True, timeout=5).strip()
         return f"{root.name} [{branch}] - {subj}"
     except Exception as e:
         LOGGER.debug("Git title suggestion failed: %s", e)
@@ -355,9 +354,12 @@ def git_state_details(root: Path) -> Optional[Dict[str, Any]]:
     git = shutil.which("git")
     if not git:
         return None
-    if not (root / ".git").exists():
-        return None
     try:
+        subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+            text=True,
+            timeout=5,
+        )
         branch = subprocess.check_output(
             [git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
             text=True,
@@ -407,6 +409,20 @@ def git_state(root: Path) -> Optional[Tuple[str, str]]:
     if not details:
         return None
     return str(details.get("branch", "")), str(details.get("sha", ""))
+
+
+def git_state_key(root: Path) -> Optional[Tuple[str, str, bool, int, int, int]]:
+    details = git_state_details(root)
+    if not details:
+        return None
+    return (
+        str(details.get("branch", "")),
+        str(details.get("sha", "")),
+        bool(details.get("dirty", False)),
+        _to_int(details.get("changed"), 0),
+        _to_int(details.get("staged"), 0),
+        _to_int(details.get("untracked"), 0),
+    )
 
 
 def log_exc(context: str, e: Exception) -> None:

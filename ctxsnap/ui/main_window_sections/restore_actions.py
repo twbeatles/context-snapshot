@@ -12,7 +12,7 @@ from PySide6 import QtWidgets
 from ctxsnap.app_storage import append_restore_history, app_dir, now_iso, save_snapshot_file
 from ctxsnap.i18n import tr
 from ctxsnap.restore import open_folder, open_terminal_at, open_vscode_at, resolve_vscode_target
-from ctxsnap.ui.dialogs.history import CompareDialog, RestoreHistoryDialog
+from ctxsnap.ui.dialogs.history import CompareDialog, RestoreHistoryDialog, SyncConflictsDialog
 from ctxsnap.ui.dialogs.restore import ChecklistDialog, RestorePreviewDialog
 from ctxsnap.utils import restore_running_apps, safe_parse_datetime
 
@@ -63,6 +63,10 @@ class MainWindowRestoreActionsSection:
             return True
         if bool(snap.get("processes")) or bool(snap.get("running_apps")):
             return True
+        if str(snap.get("root", "") or "").strip() or str(snap.get("vscode_workspace", "") or "").strip():
+            return True
+        if bool(snap.get("recent_files")) or bool(snap.get("git_state")):
+            return True
         envelope = snap.get("sensitive")
         return isinstance(envelope, dict) and bool(envelope)
 
@@ -77,16 +81,28 @@ class MainWindowRestoreActionsSection:
         out.pop("todos", None)
         out.pop("processes", None)
         out.pop("running_apps", None)
+        out.pop("root", None)
+        out.pop("vscode_workspace", None)
+        out.pop("recent_files", None)
+        out.pop("git_state", None)
+        out.pop("auto_fingerprint", None)
+        out.pop("source", None)
+        out.pop("trigger", None)
+        out["title"] = "(redacted snapshot)"
+        out["tags"] = []
         return out
 
     @staticmethod
     def _weekly_report_lines(snaps: List[Dict[str, Any]], *, redacted: bool) -> List[str]:
         lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
         for snap in snaps:
-            lines.append(f"## {snap.get('title','(no title)')}")
+            lines.append("## (redacted snapshot)" if redacted else f"## {snap.get('title','(no title)')}")
             lines.append(f"- Created: {snap.get('created_at','')}")
-            lines.append(f"- Root: {snap.get('root','')}")
-            tags = snap.get("tags", [])
+            if redacted:
+                lines.append("- Root: (redacted)")
+            else:
+                lines.append(f"- Root: {snap.get('root','')}")
+            tags = [] if redacted else snap.get("tags", [])
             if tags:
                 lines.append(f"- Tags: {', '.join(str(tag) for tag in tags)}")
             todos = [str(t) for t in snap.get("todos", []) if str(t).strip()]
@@ -223,6 +239,30 @@ class MainWindowRestoreActionsSection:
         except Exception:
             history = {"restores": []}
         dlg = RestoreHistoryDialog(self._parent_widget(self), history)
+        dlg.restoreRequested.connect(self._restore_by_id)
+        dlg.exec()
+
+    def open_sync_conflicts(self) -> None:
+        conflicts_path = app_dir() / "sync_conflicts.json"
+        if not conflicts_path.exists():
+            QtWidgets.QMessageBox.information(
+                self._parent_widget(self),
+                tr("Sync Conflicts"),
+                tr("No sync conflicts yet"),
+            )
+            return
+        try:
+            conflicts = json.loads(conflicts_path.read_text(encoding="utf-8"))
+        except Exception:
+            conflicts = {"conflicts": []}
+        if not conflicts.get("conflicts"):
+            QtWidgets.QMessageBox.information(
+                self._parent_widget(self),
+                tr("Sync Conflicts"),
+                tr("No sync conflicts yet"),
+            )
+            return
+        dlg = SyncConflictsDialog(self._parent_widget(self), conflicts)
         dlg.exec()
 
     def restore_last(self) -> None:

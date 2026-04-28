@@ -166,6 +166,8 @@ python ctxsnap_win.py
 - 부동산
 - 정산
 
+영어 환경에서 새 설정을 생성하거나 기본값으로 초기화하면 `Work`, `Personal`, `Real Estate`, `Settlement`가 기본 태그로 사용됩니다. 기존 사용자가 만든 태그는 마이그레이션 중 덮어쓰지 않습니다.
+
 **사용자 정의 태그 추가:**
 1. 설정 → Tags 탭
 2. 새 태그 이름 입력
@@ -236,7 +238,7 @@ python ctxsnap_win.py
 **Git 변경 감지:**
 1. 설정 → General 탭
 2. **Git 변경 시 자동 스냅샷** 체크
-3. Git 상태(브랜치, 커밋 등) 변경 시 자동 저장 (무인 저장)
+3. Git 상태(브랜치, 커밋, dirty/staged/untracked 변경 등) 변경 시 자동 저장 (무인 저장)
 
 **중복 자동 저장 방지:**
 - 직전 자동 스냅샷과 핵심 맥락(루트/워크스페이스/메모/TODO/태그/Git 상태)이 같으면 저장을 생략합니다.
@@ -305,6 +307,7 @@ python ctxsnap_win.py
 2. **백업 가져오기** 클릭
 3. 백업 파일 선택
 4. `Apply now`를 선택하면 즉시 반영되고, `Keep in dialog`는 Save 시점에 반영됩니다.
+5. 백업의 `Default Root`가 현재 PC의 값과 다르면 가져온 값을 적용할지, 현재 값을 유지할지 선택합니다.
 
 ---
 
@@ -361,8 +364,10 @@ CtxSnap은 시스템 트레이에 상주합니다.
 - 저장된 검색식은 메인 검색창 옆 드롭다운에서 바로 적용할 수 있습니다.
 - DPAPI가 켜진 스냅샷은 복호화된 민감 텍스트를 `index.json`의 `search_blob`에 저장하지 않습니다. 자유 검색은 런타임 복호화로만 보완됩니다.
 - 복호화에 실패하면 상세 패널과 복원 미리보기에서 경고를 표시합니다.
+- 보안 기능을 켠 뒤 기존 평문 스냅샷까지 암호화하려면 Settings > Security에서 `Encrypt existing snapshots`를 수동 실행합니다. 실행 전 안전 백업을 생성합니다.
 - 스냅샷 삭제는 sync에서 `30일 tombstone`으로 전파되어, 다른 장치에서 오래된 스냅샷이 다시 살아나는 것을 막습니다.
-- `Export Selected Snapshot` / `Export Weekly Report`는 민감 데이터가 있거나 복호화 실패 상태면 `Full export`와 `Redacted export` 중 하나를 먼저 선택해야 합니다.
+- `Export Selected Snapshot` / `Export Weekly Report`는 민감 데이터가 있거나 복호화 실패 상태면 `Full export`와 `Redacted export` 중 하나를 먼저 선택해야 합니다. `Redacted export`는 메모/TODO/프로세스/앱뿐 아니라 root/workspace/recent files/Git 상태도 제거합니다.
+- 동기화 충돌은 `sync_conflicts.json`에 local/remote payload를 함께 보존하며 Tools > Sync Conflicts에서 확인할 수 있습니다. 충돌 시 원격 변경을 자동으로 local winner로 덮어쓰지 않습니다.
 
 ### Restore 탭
 

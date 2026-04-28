@@ -7,6 +7,8 @@ from ctxsnap.ui.styles import NoScrollComboBox
 
 
 class RestoreHistoryDialog(QtWidgets.QDialog):
+    restoreRequested = QtCore.Signal(str)
+
     def __init__(self, parent: QtWidgets.QWidget, history: Dict[str, Any]) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Restore History"))
@@ -30,12 +32,17 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             self.listw.addItem(label)
 
         self.listw.currentRowChanged.connect(self._on_select)
+        self.listw.itemDoubleClicked.connect(lambda _item: self._request_restore())
 
+        btn_restore = QtWidgets.QPushButton("▶ " + tr("Restore Again"))
+        btn_restore.setProperty("primary", True)
+        btn_restore.clicked.connect(self._request_restore)
         btn_close = QtWidgets.QPushButton(tr("Close"))
         btn_close.clicked.connect(self.accept)
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)
+        btn_row.addWidget(btn_restore)
         btn_row.addWidget(btn_close)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -77,6 +84,16 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             f"   • VSCode opened: {'Yes' if entry.get('vscode_opened') else 'No'}",
         ]
         self.detail.setText("\n".join(str(l) for l in lines))
+
+    def _request_restore(self) -> None:
+        row = self.listw.currentRow()
+        if row < 0 or row >= len(self._items):
+            return
+        sid = str(self._items[row].get("snapshot_id", "") or "").strip()
+        if not sid:
+            return
+        self.restoreRequested.emit(sid)
+        self.accept()
 
 
 class CompareDialog(QtWidgets.QDialog):
@@ -188,3 +205,66 @@ class CompareDialog(QtWidgets.QDialog):
         if not diff_text.strip():
             diff_text = "✓ No differences found between the two snapshots."
         self.diff_view.setText(diff_text)
+
+
+class SyncConflictsDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, conflicts: Dict[str, Any]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Sync Conflicts"))
+        self.setModal(True)
+        self.setMinimumSize(720, 480)
+
+        title = QtWidgets.QLabel("🛰️ " + tr("Sync Conflicts"))
+        title.setObjectName("TitleLabel")
+
+        self.listw = QtWidgets.QListWidget()
+        self.detail = QtWidgets.QTextEdit()
+        self.detail.setReadOnly(True)
+        self.detail.setPlaceholderText(tr("Select a conflict to view details."))
+        self._items = conflicts.get("conflicts", []) if isinstance(conflicts.get("conflicts"), list) else []
+        for entry in self._items:
+            label = f"{entry.get('at','')}  •  {entry.get('snapshot_id','')}  •  {entry.get('reason','')}"
+            self.listw.addItem(label)
+        self.listw.currentRowChanged.connect(self._on_select)
+
+        btn_close = QtWidgets.QPushButton(tr("Close"))
+        btn_close.clicked.connect(self.accept)
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_close)
+
+        body = QtWidgets.QHBoxLayout()
+        body.addWidget(self.listw, 1)
+        body.addWidget(self.detail, 2)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.addWidget(title)
+        layout.addLayout(body, 1)
+        layout.addLayout(btn_row)
+
+    def _on_select(self, row: int) -> None:
+        if row < 0 or row >= len(self._items):
+            self.detail.clear()
+            return
+        entry = self._items[row]
+        local_payload = entry.get("local_payload") if isinstance(entry.get("local_payload"), dict) else {}
+        remote_payload = entry.get("remote_payload") if isinstance(entry.get("remote_payload"), dict) else {}
+        lines = [
+            f"Snapshot ID: {entry.get('snapshot_id', '')}",
+            f"At: {entry.get('at', '')}",
+            f"Provider: {entry.get('provider', '')}",
+            f"Reason: {entry.get('reason', '')}",
+            "",
+            "Local:",
+            f"  Rev: {entry.get('local_rev', '')}",
+            f"  Updated: {entry.get('local_updated_at', '')}",
+            f"  Title: {local_payload.get('title', '')}",
+            "",
+            "Remote:",
+            f"  Rev: {entry.get('remote_rev', '')}",
+            f"  Updated: {entry.get('remote_updated_at', '')}",
+            f"  Title: {remote_payload.get('title', '')}",
+        ]
+        self.detail.setText("\n".join(str(line) for line in lines))

@@ -25,6 +25,7 @@ context-snapshot/
 ├── README.md
 ├── README.en.md
 ├── PROJECT_STRUCTURE_ANALYSIS.md
+├── FEATURE_IMPLEMENTATION_REVIEW.md
 ├── gpt.md
 ├── CLAUDE.md
 ├── ctxsnap/
@@ -61,6 +62,9 @@ context-snapshot/
 │       ├── models.py
 │       └── styles.py
 ├── tests/
+│   ├── test_automation_helpers.py
+│   ├── test_dialog_behaviors.py
+│   ├── test_git_helpers.py
 │   ├── test_migration.py
 │   ├── test_sync_engine.py
 │   ├── test_security_service.py
@@ -105,6 +109,7 @@ context-snapshot/
 - `settings.security`: `dpapi_enabled`, `encrypt_*`
 - `settings.search`: `enable_field_query`, `saved_queries`
 - `settings.restore_profiles`: 복원 프리셋 목록
+- 신규 설정/Reset Defaults의 기본 태그는 언어별로 생성한다(`ko`: 업무/개인/부동산/정산, `en`: Work/Personal/Real Estate/Settlement). 기존 사용자 태그는 마이그레이션에서 덮어쓰지 않는다.
 - `index.tombstones`: 삭제 전파용 tombstone 목록(`id`, `deleted_at`), 30일 유지
 - `snapshot.schema_version=2`, `rev`, `updated_at`
 - `snapshot.git_state`: `branch`, `sha`, `dirty`, `changed`, `staged`, `untracked`
@@ -114,9 +119,14 @@ context-snapshot/
 
 - DPAPI 스냅샷의 복호화된 민감 텍스트는 `index.search_blob`에 저장하지 않는다.
 - 메타 수정/자동 보관/최근 파일 백그라운드 갱신은 raw snapshot 기준으로 저장해서 민감 평문이 다시 파일에 쓰이지 않게 한다.
+- raw encrypted snapshot을 metadata-only로 저장할 때는 기존 `sensitive` envelope를 반드시 보존한다.
 - 복호화 실패 시 `_security_error`를 유지하고 UI(상세 패널, 복원 미리보기)에서 경고를 표시한다.
-- 스냅샷 export/주간 보고서는 민감 데이터가 있으면 `Full export` 또는 `Redacted export`를 먼저 선택해야 한다.
+- 스냅샷 export/주간 보고서는 민감 데이터가 있으면 `Full export` 또는 `Redacted export`를 먼저 선택해야 한다. Redacted export는 note/TODO/process/app뿐 아니라 root/workspace/recent files/Git 상태도 제거한다.
+- 기존 평문 스냅샷 암호화는 Settings의 수동 migration 버튼으로만 실행하며, 실행 전 안전 백업을 만든다.
 - 메인 검색창 옆 드롭다운은 `settings.search.saved_queries`를 바로 적용하는 읽기 전용 진입점이다.
+- Git 자동 스냅샷 감지는 `.git` 폴더 직접 검사 대신 `git -C` 기반으로 repository/worktree/subdirectory를 판별하고 branch/sha/dirty/changed/staged/untracked를 비교한다.
+- Sync 충돌은 local/remote payload를 `sync_conflicts.json`에 함께 보존하며, 충돌한 remote payload를 local winner로 자동 덮어쓰지 않는다.
+- 외부 backup/sync snapshot id는 basename-safe validator를 통과해야 하며 snapshots 디렉터리 밖 경로로 해석되면 거부한다.
 
 ## 기능 플래그
 

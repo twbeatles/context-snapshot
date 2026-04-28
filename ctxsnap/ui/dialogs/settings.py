@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from PySide6 import QtCore, QtWidgets
 
-from ctxsnap.constants import DEFAULT_TAGS, APP_NAME
+from ctxsnap.constants import DEFAULT_TAGS, APP_NAME, default_tags_for_language
 from ctxsnap.i18n import tr
 from ctxsnap.utils import log_exc
 from ctxsnap.app_storage import (
@@ -45,7 +45,8 @@ class SettingsDialog(QtWidgets.QDialog):
     """
     
     settingsImported = QtCore.Signal(dict)
-    syncRequested = QtCore.Signal()
+    syncRequested = QtCore.Signal(dict)
+    securityMigrationRequested = QtCore.Signal(dict)
 
     def __init__(self, parent: QtWidgets.QWidget, settings: Dict[str, Any], *, index_path: Path, snaps_dir: Path):
         super().__init__(parent)
@@ -350,7 +351,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.sync_interval_minutes.setSuffix(tr("suffix_min"))
         self.sync_interval_minutes.setValue(int(sync_cfg.get("auto_interval_min", 0)))
         self.btn_sync_now = QtWidgets.QPushButton("🔄 " + tr("Sync Now"))
-        self.btn_sync_now.clicked.connect(self.syncRequested.emit)
+        self.btn_sync_now.clicked.connect(self.request_sync_now)
         sync_box = QtWidgets.QGroupBox("🛰️ " + tr("Sync Settings"))
         sync_layout = QtWidgets.QFormLayout(sync_box)
         sync_layout.setSpacing(8)
@@ -370,6 +371,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.sec_todos.setChecked(bool(security_cfg.get("encrypt_todos", True)))
         self.sec_processes.setChecked(bool(security_cfg.get("encrypt_processes", True)))
         self.sec_apps.setChecked(bool(security_cfg.get("encrypt_running_apps", True)))
+        self.btn_security_migrate = QtWidgets.QPushButton("🔐 " + tr("Encrypt existing snapshots"))
+        self.btn_security_migrate.clicked.connect(self.request_security_migration)
         sec_box = QtWidgets.QGroupBox("🔐 " + tr("Security Settings"))
         sec_layout = QtWidgets.QVBoxLayout(sec_box)
         sec_layout.setSpacing(6)
@@ -378,6 +381,7 @@ class SettingsDialog(QtWidgets.QDialog):
         sec_layout.addWidget(self.sec_todos)
         sec_layout.addWidget(self.sec_processes)
         sec_layout.addWidget(self.sec_apps)
+        sec_layout.addWidget(self.btn_security_migrate)
 
         search_cfg = settings.get("search", {})
         self.search_enable_field_query = QtWidgets.QCheckBox("🔎 " + tr("Enable Field Query"))
@@ -701,11 +705,38 @@ class SettingsDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "Import failed", str(e))
 
     def reset_defaults(self):
-        new_settings = migrate_settings({"tags": DEFAULT_TAGS})
+        new_settings = migrate_settings(
+            {
+                "language": self.lang_combo.currentData(),
+                "tags": default_tags_for_language(self.lang_combo.currentData()),
+            }
+        )
         # Keep onboarding shown; reset is for behavior not education
         new_settings["onboarding_shown"] = True
         self.apply_settings_to_controls(new_settings)
         self.b_msg.setText("✅ " + tr("Reset to defaults done"))
+
+    def request_security_migration(self) -> None:
+        vals = self.values()
+        if not bool(vals.get("dev_flags", {}).get("security_enabled", False)) or not bool(vals.get("security", {}).get("dpapi_enabled", False)):
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("Security Settings"),
+                tr("Security migration requires DPAPI"),
+            )
+            return
+        self.securityMigrationRequested.emit(vals)
+
+    def request_sync_now(self) -> None:
+        vals = self.values()
+        if not bool(vals.get("dev_flags", {}).get("sync_enabled", False)):
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("Sync Settings"),
+                tr("Sync requires enabled flag"),
+            )
+            return
+        self.syncRequested.emit(vals)
 
     def pick_default_root(self) -> None:
         start = self.default_root_edit.text().strip() or str(Path.home())
@@ -956,7 +987,7 @@ class SettingsDialog(QtWidgets.QDialog):
             "default_root": self.default_root_edit.text().strip() or str(Path.home()),
             "recent_files_limit": int(self.recent_spin.value()),
             "restore_preview_default": bool(self.preview_default.isChecked()),
-            "tags": tags or DEFAULT_TAGS,
+            "tags": tags or default_tags_for_language(self.lang_combo.currentData()),
             "hotkey": {
                 "enabled": bool(self.hk_enabled.isChecked()),
                 "ctrl": bool(self.hk_ctrl.isChecked()),

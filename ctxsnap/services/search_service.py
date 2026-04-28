@@ -33,7 +33,10 @@ class SearchService:
         if not query:
             return out
         try:
-            tokens = shlex.split(query)
+            lexer = shlex.shlex(query, posix=True)
+            lexer.whitespace_split = True
+            lexer.escape = ""
+            tokens = list(lexer)
         except ValueError:
             tokens = query.split()
         for tok in tokens:
@@ -120,8 +123,8 @@ class SearchService:
         return True
 
     def build_blob_if_missing(self, item: Dict[str, Any], snap: Optional[Dict[str, Any]]) -> str:
-        if item.get("search_blob"):
-            return str(item.get("search_blob") or "")
+        cached = str(item.get("search_blob") or "")
         if not snap:
-            return ""
-        return build_search_blob(snap)
+            return cached
+        runtime = build_search_blob(snap)
+        return f"{cached} {runtime}".strip()

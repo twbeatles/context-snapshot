@@ -5,11 +5,11 @@ from __future__ import annotations
 import copy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 from PySide6 import QtWidgets
 
-from ctxsnap.app_storage import app_dir, migrate_settings, migrate_snapshot, save_json
+from ctxsnap.app_storage import app_dir, is_valid_snapshot_id, migrate_settings, migrate_snapshot, safe_snapshot_path, save_json
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.logging import get_logger
 from ctxsnap.i18n import tr
@@ -60,7 +60,7 @@ class MainWindowSettingsBackupSection:
         self._apply_archive_policy()
         return True
 
-    def _auto_backup_current(self) -> Path:
+    def _auto_backup_current(self) -> Tuple[Path, bool, str]:
         backups = app_dir() / "backups"
         backups.mkdir(parents=True, exist_ok=True)
         bkp = backups / f"{APP_NAME}_autobackup_{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
@@ -74,9 +74,10 @@ class MainWindowSettingsBackupSection:
                 include_index=True,
                 encrypt_backup=False,
             )
+            return bkp, True, ""
         except Exception as e:
             log_exc("auto backup", e)
-        return bkp
+            return bkp, False, str(e)
 
     def apply_imported_backup(self, payload: Dict[str, Any]) -> bool:
         """Apply imported backup: optionally merge/overwrite snapshots/index, then apply settings."""
@@ -85,10 +86,13 @@ class MainWindowSettingsBackupSection:
         prev_index = copy.deepcopy(self.index)
         prev_settings = copy.deepcopy(self.settings)
         prev_snapshot_files: Dict[str, str] = {}
+        captured_snapshot_files = False
 
         try:
             if data:
-                safety_backup = self._auto_backup_current()
+                safety_backup, backup_success, backup_error = self._auto_backup_current()
+                if not backup_success:
+                    raise RuntimeError(f"Failed to create safety backup before import: {backup_error}")
                 self.statusBar().showMessage(f"Safety backup created: {safety_backup.name}", 3500)
 
                 msg = QtWidgets.QMessageBox(self._parent_widget(self))
@@ -130,6 +134,7 @@ class MainWindowSettingsBackupSection:
 
                 for f in self.snaps_dir.glob("*.json"):
                     prev_snapshot_files[f.name] = f.read_text(encoding="utf-8")
+                captured_snapshot_files = True
 
                 if strategy == "replace":
                     for f in self.snaps_dir.glob("*.json"):
@@ -143,12 +148,13 @@ class MainWindowSettingsBackupSection:
                         continue
                     snap = migrate_snapshot(dict(raw_snap))
                     sid = str(snap.get("id") or "").strip()
-                    if not sid:
+                    if not is_valid_snapshot_id(sid):
+                        LOGGER.warning("Skipping imported snapshot with invalid id: %s", sid)
                         continue
                     if strategy == "merge" and sid in existing_ids:
                         continue
 
-                    snap_path = self.snap_path(sid)
+                    snap_path = safe_snapshot_path(self.snaps_dir, sid)
                     self._save_snapshot_or_raise(snap_path, snap, f"imported snapshot {sid}")
                     snap_mtime = snapshot_mtime(snap_path)
                     entry = self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime)
@@ -171,6 +177,9 @@ class MainWindowSettingsBackupSection:
                         if not isinstance(raw_item, dict):
                             continue
                         item = dict(raw_item)
+                        if not is_valid_snapshot_id(str(item.get("id") or "")):
+                            LOGGER.warning("Skipping imported index item with invalid id: %s", item.get("id"))
+                            continue
                         item.setdefault("tags", [])
                         item.setdefault("pinned", False)
                         item.setdefault("archived", False)
@@ -201,7 +210,7 @@ class MainWindowSettingsBackupSection:
                 dedup = []
                 for it in self.index.get("snapshots", []):
                     sid = str(it.get("id") or "")
-                    if not sid or sid in seen:
+                    if not is_valid_snapshot_id(sid) or sid in seen:
                         continue
                     seen.add(sid)
                     dedup.append(it)
@@ -216,7 +225,7 @@ class MainWindowSettingsBackupSection:
                     deleted_at = tombstone_map.get(sid, "")
                     snapshot_stamp = self.snapshot_service.snapshot_timestamp(item)
                     if deleted_at and deleted_at >= snapshot_stamp:
-                        (self.snaps_dir / f"{sid}.json").unlink(missing_ok=True)
+                        safe_snapshot_path(self.snaps_dir, sid).unlink(missing_ok=True)
                         continue
                     kept_snapshots.append(item)
                 self.index["snapshots"] = kept_snapshots
@@ -225,7 +234,18 @@ class MainWindowSettingsBackupSection:
                 self._reset_pagination_and_refresh()
 
             imported_settings = migrate_settings(payload.get("settings", {}))
-            imported_settings["default_root"] = prev_settings.get("default_root", str(Path.home()))
+            imported_root = str(imported_settings.get("default_root", "") or "")
+            current_root = str(prev_settings.get("default_root", str(Path.home())) or str(Path.home()))
+            if imported_root and imported_root != current_root:
+                msg = QtWidgets.QMessageBox(self._parent_widget(self))
+                msg.setWindowTitle(tr("Default Root"))
+                msg.setText(tr("Import default root choice"))
+                msg.setInformativeText(f"{tr('Imported')}: {imported_root}\n{tr('Current')}: {current_root}")
+                btn_imported = msg.addButton(tr("Use imported default root"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+                btn_keep = msg.addButton(tr("Keep current default root"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+                msg.exec()
+                if msg.clickedButton() == btn_keep:
+                    imported_settings["default_root"] = current_root
             imported_settings["auto_backup_last"] = prev_settings.get("auto_backup_last", "")
             imported_settings["onboarding_shown"] = prev_settings.get("onboarding_shown", False)
             if not self.apply_settings(imported_settings, save=True):
@@ -236,7 +256,7 @@ class MainWindowSettingsBackupSection:
             log_exc("apply imported backup", exc if isinstance(exc, Exception) else Exception(str(exc)))
 
             try:
-                if data:
+                if data and captured_snapshot_files:
                     for f in self.snaps_dir.glob("*.json"):
                         f.unlink(missing_ok=True)
                     for name, raw in prev_snapshot_files.items():
@@ -262,6 +282,77 @@ class MainWindowSettingsBackupSection:
             )
             return False
 
+    def migrate_existing_snapshots_security(self, vals: Dict[str, Any]) -> None:
+        if not self.security_service.is_available():
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Security Settings"),
+                tr("DPAPI unavailable"),
+            )
+            return
+        confirm = QtWidgets.QMessageBox.question(
+            self._parent_widget(self),
+            tr("Security Settings"),
+            tr("Encrypt existing snapshots confirm"),
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        prev_index = copy.deepcopy(self.index)
+        prev_settings = copy.deepcopy(self.settings)
+        prev_snapshot_files: Dict[str, str] = {}
+        captured_snapshot_files = False
+        try:
+            safety_backup, backup_success, backup_error = self._auto_backup_current()
+            if not backup_success:
+                raise RuntimeError(f"Failed to create safety backup before encryption: {backup_error}")
+            for f in self.snaps_dir.glob("*.json"):
+                prev_snapshot_files[f.name] = f.read_text(encoding="utf-8")
+            captured_snapshot_files = True
+            if not self.apply_settings(vals, save=True):
+                return
+
+            migrated_count = 0
+            for item in list(self.index.get("snapshots", [])):
+                sid = str(item.get("id") or "").strip()
+                if not is_valid_snapshot_id(sid):
+                    continue
+                snap = self.load_snapshot_raw(sid)
+                if not snap:
+                    continue
+                snap = self.snapshot_service.touch_snapshot(snap)
+                path = safe_snapshot_path(self.snaps_dir, sid)
+                persisted = self._persist_snapshot_or_raise(path, snap, f"security migration {sid}")
+                item.update(self._index_entry_from_snapshot_data(persisted, snap_mtime=snapshot_mtime(path)))
+                migrated_count += 1
+            self.index = self.snapshot_service.touch_index(self.index)
+            self._save_json_or_raise(self.index_path, self.index, "index after security migration")
+            self._reset_pagination_and_refresh()
+            self.statusBar().showMessage(
+                tr("Security migration done").format(count=migrated_count, backup=safety_backup.name),
+                4500,
+            )
+        except Exception as exc:
+            log_exc("security migration", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            try:
+                if captured_snapshot_files:
+                    for f in self.snaps_dir.glob("*.json"):
+                        f.unlink(missing_ok=True)
+                    for name, raw in prev_snapshot_files.items():
+                        safe_snapshot_path(self.snaps_dir, Path(name).stem).write_text(raw, encoding="utf-8")
+            except Exception as rollback_exc:
+                log_exc("rollback security migration", rollback_exc)
+            self.index = prev_index
+            self.settings = prev_settings
+            save_json(self.index_path, self.index)
+            save_json(self.settings_path, self.settings)
+            self._reset_pagination_and_refresh()
+            QtWidgets.QMessageBox.warning(
+                self._parent_widget(self),
+                tr("Error"),
+                tr("Security migration failed"),
+            )
+
     def open_settings(self) -> None:
         dlg = SettingsDialog(
             self._parent_widget(self),
@@ -271,6 +362,7 @@ class MainWindowSettingsBackupSection:
         )
         dlg.settingsImported.connect(self.apply_imported_backup)
         dlg.syncRequested.connect(self._run_scheduled_sync)
+        dlg.securityMigrationRequested.connect(self.migrate_existing_snapshots_security)
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
 

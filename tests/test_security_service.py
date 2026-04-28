@@ -46,3 +46,22 @@ def test_encrypt_and_decrypt_snapshot_sensitive_fields() -> None:
     decrypted = svc.decrypt_snapshot_sensitive_fields(encrypted)
     assert decrypted["note"] == "secret"
     assert decrypted["todos"][0] == "one"
+
+
+def test_reencrypt_raw_encrypted_snapshot_preserves_existing_envelope() -> None:
+    svc = SecurityService()
+    if not svc.is_available():
+        pytest.skip("DPAPI not available")
+    snap = {
+        "id": "s1",
+        "note": "secret",
+        "todos": ["one", "two", "three"],
+        "processes": [{"name": "code"}],
+        "running_apps": [{"name": "chrome"}],
+    }
+    encrypted = svc.encrypt_snapshot_sensitive_fields(snap, _enabled_settings())
+    encrypted["pinned"] = True
+    persisted = svc.encrypt_snapshot_sensitive_fields(encrypted, _enabled_settings())
+    decrypted = svc.decrypt_snapshot_sensitive_fields(persisted)
+    assert decrypted["note"] == "secret"
+    assert decrypted["todos"] == ["one", "two", "three"]

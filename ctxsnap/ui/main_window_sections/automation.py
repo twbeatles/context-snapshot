@@ -9,14 +9,14 @@ from typing import List, cast
 
 from PySide6 import QtCore
 
-from ctxsnap.app_storage import app_dir, load_json, now_iso, save_json, save_snapshot_file
+from ctxsnap.app_storage import app_dir, load_json, migrate_settings, now_iso, save_json, save_snapshot_file
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.logging import get_logger
 from ctxsnap.core.sync import SyncEngine
 from ctxsnap.core.sync.providers import CloudStubSyncProvider, LocalSyncProvider
 from ctxsnap.core.worker import RecentFilesWorker
 from ctxsnap.i18n import tr
-from ctxsnap.utils import git_state, log_exc, safe_parse_datetime, snapshot_mtime
+from ctxsnap.utils import git_state_key, log_exc, safe_parse_datetime, snapshot_mtime
 
 LOGGER = get_logger()
 
@@ -45,8 +45,9 @@ class MainWindowAutomationSection:
         if not self.backup_timer.isActive():
             self.backup_timer.start()
 
-    def _init_sync_engine(self) -> None:
-        sync_cfg = self.settings.get("sync", {})
+    def _init_sync_engine(self, settings_override: object | None = None) -> None:
+        active_settings = migrate_settings(settings_override) if isinstance(settings_override, dict) else self.settings
+        sync_cfg = active_settings.get("sync", {})
         provider_name = str(sync_cfg.get("provider", "local") or "local").strip().lower()
         if provider_name == "local":
             local_root = Path(str(sync_cfg.get("local_root", app_dir() / "sync_local"))).expanduser()
@@ -71,16 +72,20 @@ class MainWindowAutomationSection:
         if not self.sync_timer.isActive():
             self.sync_timer.start()
 
-    def _run_scheduled_sync(self) -> None:
-        sync_enabled = bool(self.settings.get("dev_flags", {}).get("sync_enabled", False))
+    def _run_scheduled_sync(self, settings_override: object | None = None) -> None:
+        active_settings = migrate_settings(settings_override) if isinstance(settings_override, dict) else self.settings
+        sync_enabled = bool(active_settings.get("dev_flags", {}).get("sync_enabled", False))
         if not sync_enabled or not self.sync_engine:
             return
         try:
+            if isinstance(settings_override, dict):
+                self._init_sync_engine(active_settings)
             result = self.sync_engine.sync()
-            self.settings.setdefault("sync", {})
-            self.settings["sync"]["last_cursor"] = result.get("cursor", "")
-            if not save_json(self.settings_path, self.settings):
-                LOGGER.warning("Failed to save sync cursor.")
+            if not isinstance(settings_override, dict):
+                self.settings.setdefault("sync", {})
+                self.settings["sync"]["last_cursor"] = result.get("cursor", "")
+                if not save_json(self.settings_path, self.settings):
+                    LOGGER.warning("Failed to save sync cursor.")
             self.index = self.snapshot_service.migrate_index(load_json(self.index_path))
             self.refresh_list(reset_page=False)
             self.statusBar().showMessage(
@@ -106,7 +111,11 @@ class MainWindowAutomationSection:
                     return
             except Exception:
                 pass
-        bkp = self._auto_backup_current()
+        bkp, success, error = self._auto_backup_current()
+        if not success:
+            self.statusBar().showMessage(f"Auto backup failed: {error}", 3500)
+            LOGGER.warning("Auto backup failed: %s", error)
+            return
         self.settings["auto_backup_last"] = now_iso()
         if not save_json(self.settings_path, self.settings):
             LOGGER.warning("Failed to persist auto backup timestamp.")
@@ -170,7 +179,7 @@ class MainWindowAutomationSection:
         if not bool(self.settings.get("auto_snapshot_on_git_change", False)):
             return
         root = Path(self.settings.get("default_root", str(Path.home())))
-        state = git_state(root)
+        state = git_state_key(root)
         if not state:
             return
         if self._last_git_state and self._last_git_state != state:

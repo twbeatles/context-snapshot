@@ -2,8 +2,13 @@
 build/
 dist/
 *.exe
+*.msi
+*.zip
+*.7z
+*.pdb
 *.egg-info/
 pip-wheel-metadata/
+installer/Output/
 
 # Python bytecode and caches
 __pycache__/

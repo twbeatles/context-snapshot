@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
-from ctxsnap.app_storage import now_iso
+from ctxsnap.app_storage import is_valid_snapshot_id, now_iso
 
 
 class SnapshotService:
@@ -76,7 +76,7 @@ class SnapshotService:
                 continue
             sid = str(raw.get("id") or "").strip()
             deleted_at = str(raw.get("deleted_at") or "").strip()
-            if not sid or not deleted_at:
+            if not is_valid_snapshot_id(sid) or not deleted_at:
                 continue
             previous = merged.get(sid, "")
             if deleted_at > previous:

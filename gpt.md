@@ -8,7 +8,7 @@
 ### Key modules
 - `ctxsnap/app_storage.py`: storage paths, migrations, atomic JSON IO, backup import/export.
 - `ctxsnap/services/snapshot_service.py`: index/snapshot migration, revision metadata, tombstone helpers, latest-item selection.
-- `ctxsnap/services/search_service.py`: free-text and field-query parsing/matching.
+- `ctxsnap/services/search_service.py`: free-text and field-query parsing/matching, including runtime decrypted fallback.
 - `ctxsnap/core/security.py`: DPAPI envelope encryption/decryption for sensitive snapshot fields.
 - `ctxsnap/core/sync/*`: sync provider protocol, merge engine, local/cloud-stub providers.
 - `ctxsnap/ui/main_window.py`: orchestration shell and top-level UI composition.
@@ -31,6 +31,8 @@
 - Snapshot revision metadata: `rev`, `updated_at`
 - `index.tombstones = [{"id": "...", "deleted_at": "..."}]` with 30-day retention
 - DPAPI envelope shape: `{"enc":"dpapi","v":1,"blob":"<base64>"}`
+- Snapshot ids must pass the basename-safe validator before being used as files.
+- Default tags are language-aware for new/reset settings and user tags are preserved during migration.
 
 ### Feature flags (`settings.dev_flags`)
 - `sync_enabled`
@@ -39,13 +41,16 @@
 - `restore_profiles_enabled`
 
 ### Current behavior notes
-- Sync merge still prefers latest `(rev, updated_at)`; same-key payload conflicts are recorded in the conflict queue.
+- Sync merge still prefers latest `(rev, updated_at)`; same-key payload conflicts preserve both local and remote payloads in the conflict queue and do not overwrite remote payloads.
 - Snapshot deletion now propagates through sync via 30-day tombstones to prevent stale resurrection.
-- Sensitive fields are persisted through raw/encrypted snapshot paths. Background recent-file updates and archive metadata updates do not rewrite decrypted plaintext back to disk.
-- Decrypted sensitive text is never persisted into `index.json` `search_blob`. Free-text search may decrypt at runtime only.
+- Sensitive fields are persisted through raw/encrypted snapshot paths. Background recent-file updates and archive metadata updates preserve existing DPAPI envelopes and do not rewrite decrypted plaintext back to disk.
+- Decrypted sensitive text is never persisted into `index.json` `search_blob`. Free-text search may decrypt at runtime and checks decrypted content even when a public cache blob exists.
 - Decryption failures surface `_security_error` to the detail panel and restore preview instead of failing silently.
-- `Export Selected Snapshot` and `Export Weekly Report` require `Full export` vs `Redacted export` when sensitive data is present or decryption has failed.
+- `Export Selected Snapshot` and `Export Weekly Report` require `Full export` vs `Redacted export` when sensitive data is present or decryption has failed. Redacted export removes sensitive fields plus root/workspace/recent files/Git state.
+- Existing plaintext snapshots are encrypted only through the explicit Settings security migration action, which creates a safety backup first.
+- Git automation uses `git -C` discovery and compares branch/sha/dirty/changed/staged/untracked state, including repositories opened from subdirectories/worktrees.
 - `Restore Last` uses newest `created_at`, then `updated_at`, then `id` as a tie-breaker.
+- Restore History supports double-click or Restore Again to rerun a restore.
 - Close (X) minimizes to tray; full exit comes from tray `Quit`.
 
 ### Build / test
@@ -53,10 +58,11 @@
 - Type check: `python -m pyright`
 - Test: `python -m pytest -q`
 - Build: `python -m PyInstaller ctxsnap_win.spec`
-- Packaging check: `ctxsnap_win.spec` was validated successfully with PyInstaller after the security/sync/export updates.
+- Packaging check: `ctxsnap_win.spec` remains valid; no new hidden imports were needed because new UI is inside existing modules.
 
 ### Repo guardrails
 - `pyrightconfig.json`: shared Windows typing config, Python 3.11 target.
 - `.editorconfig`: UTF-8 + CRLF + final-newline/trailing-space policy.
 - `.gitattributes`: repository text EOL normalization.
+- `.gitignore`: excludes build/cache/runtime plus release artifacts such as installer output, archives, MSI, and PDB files.
 - CI (`.github/workflows/ci.yml`): runs `pyright` then `pytest`.

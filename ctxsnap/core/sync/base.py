@@ -19,6 +19,8 @@ class SyncConflict:
     remote_rev: int
     local_updated_at: str
     remote_updated_at: str
+    local_payload: Optional[Dict[str, Any]] = None
+    remote_payload: Optional[Dict[str, Any]] = None
 
 
 class SyncProvider(Protocol):

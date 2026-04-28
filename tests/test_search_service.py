@@ -56,3 +56,26 @@ def test_free_text_search_can_match_runtime_decrypted_snapshot_without_cache() -
         }
 
     assert svc.matches_item(item, parsed, load_snapshot=loader) is True
+
+
+def test_free_text_search_uses_runtime_snapshot_even_when_cache_has_public_blob() -> None:
+    svc = SearchService()
+    parsed = svc.parse("secret-note", field_enabled=True)
+    item = {"id": "x", "title": "plain", "root": "", "tags": [], "search_blob": "C:/repo/public.py"}
+
+    def loader(_: str):
+        return {
+            "note": "secret-note",
+            "todos": ["", "", ""],
+            "recent_files": ["C:/repo/public.py"],
+            "processes": [],
+            "running_apps": [],
+        }
+
+    assert svc.matches_item(item, parsed, load_snapshot=loader) is True
+
+
+def test_parse_preserves_windows_backslashes() -> None:
+    svc = SearchService()
+    parsed = svc.parse(r"root:C:\Projects\ctxsnap", field_enabled=True)
+    assert parsed.fields["root"] == [r"c:\projects\ctxsnap"]
