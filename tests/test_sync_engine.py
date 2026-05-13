@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from ctxsnap.app_storage import save_json, save_snapshot_file
@@ -122,9 +123,10 @@ def test_sync_applies_remote_tombstone_and_removes_local_snapshot(tmp_path: Path
 
     remote_root = tmp_path / "remote"
     provider = LocalSyncProvider(remote_root)
+    deleted_at = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
     payload = {
         "cursor": "",
-        "index": {"snapshots": [], "tombstones": [{"id": "s1", "deleted_at": "2026-04-10T00:00:00"}]},
+        "index": {"snapshots": [], "tombstones": [{"id": "s1", "deleted_at": deleted_at}]},
         "snapshots": [],
     }
     (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -140,7 +142,7 @@ def test_sync_applies_remote_tombstone_and_removes_local_snapshot(tmp_path: Path
     assert result["snapshot_count"] == 0
     assert not (snaps / "s1.json").exists()
     merged_index = json.loads(index_path.read_text(encoding="utf-8"))
-    assert merged_index["tombstones"] == [{"id": "s1", "deleted_at": "2026-04-10T00:00:00"}]
+    assert merged_index["tombstones"] == [{"id": "s1", "deleted_at": deleted_at}]
 
 
 def test_sync_prunes_old_tombstones(tmp_path: Path) -> None:
