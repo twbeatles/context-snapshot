@@ -46,3 +46,11 @@ backups/
 *.tmp
 Thumbs.db
 .DS_Store
+
+# Agent configuration and documentation
+.agents/
+.claude/
+.grok/
+.specify/
+**/AGENTS.md
+**/CLAUDE.md
