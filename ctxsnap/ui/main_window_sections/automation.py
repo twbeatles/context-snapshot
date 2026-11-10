@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pyright: reportAttributeAccessIssue=false
-
 import copy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,7 +8,14 @@ from typing import List, cast
 
 from PySide6 import QtCore
 
-from ctxsnap.app_storage import app_dir, load_json, migrate_settings, now_iso, save_json, save_snapshot_file
+from ctxsnap.app_storage import (
+    app_dir,
+    load_json,
+    migrate_settings,
+    now_iso,
+    save_json,
+    save_snapshot_file,
+)
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.logging import get_logger
 from ctxsnap.core.sync import SyncEngine

@@ -1,23 +1,24 @@
 from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+
 from PySide6 import QtCore, QtWidgets
 
-from ctxsnap.constants import DEFAULT_TAGS, APP_NAME, default_tags_for_language
-from ctxsnap.i18n import tr
-from ctxsnap.utils import log_exc
 from ctxsnap.app_storage import (
-    migrate_settings,
     export_backup_to_file,
     import_backup_from_file,
+    migrate_settings,
 )
+from ctxsnap.constants import APP_NAME, DEFAULT_TAGS, default_tags_for_language
+from ctxsnap.i18n import tr
 from ctxsnap.ui.styles import (
     NoScrollComboBox,
-    NoScrollSpinBox,
     NoScrollDoubleSpinBox,
-    disable_wheel_scroll,
+    NoScrollSpinBox,
 )
+from ctxsnap.utils import log_exc
 
 
 def _make_scrollable(widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
@@ -688,7 +689,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 "✓ " + tr("Apply now"),
                 QtWidgets.QMessageBox.ButtonRole.AcceptRole,
             )
-            btn_keep = msg.addButton(
+            _btn_keep = msg.addButton(
                 tr("Keep in dialog"),
                 QtWidgets.QMessageBox.ButtonRole.RejectRole,
             )

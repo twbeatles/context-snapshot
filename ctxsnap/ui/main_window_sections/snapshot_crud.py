@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pyright: reportAttributeAccessIssue=false
-
 import copy
 import hashlib
 import html
@@ -13,7 +12,15 @@ from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtCore, QtWidgets
 
-from ctxsnap.app_storage import Snapshot, gen_id, migrate_snapshot, now_iso, safe_snapshot_path, save_json, save_snapshot_file
+from ctxsnap.app_storage import (
+    Snapshot,
+    gen_id,
+    migrate_snapshot,
+    now_iso,
+    safe_snapshot_path,
+    save_json,
+    save_snapshot_file,
+)
 from ctxsnap.constants import DEFAULT_TAGS
 from ctxsnap.core.logging import get_logger
 from ctxsnap.i18n import tr

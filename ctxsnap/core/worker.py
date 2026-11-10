@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from pathlib import Path
 from typing import List
+
 from PySide6 import QtCore
+
 from ctxsnap.utils import recent_files_under
 
 

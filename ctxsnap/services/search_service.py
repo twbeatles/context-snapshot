@@ -89,26 +89,26 @@ class SearchService:
         if not parsed.fields:
             return True
 
-        for field, values in parsed.fields.items():
-            if field == "title":
+        for fname, values in parsed.fields.items():
+            if fname == "title":
                 if not self._contains_all(title, values):
                     return False
-            elif field == "root":
+            elif fname == "root":
                 if not self._contains_all(root, values):
                     return False
-            elif field == "tags":
+            elif fname == "tags":
                 joined = " ".join(tags)
                 if not self._contains_all(joined, values):
                     return False
-            elif field in {"todos", "note", "processes", "running_apps"}:
+            elif fname in {"todos", "note", "processes", "running_apps"}:
                 loaded = ensure_snapshot()
                 if not loaded:
                     return False
-                if field == "todos":
+                if fname == "todos":
                     hay = " ".join(str(x).lower() for x in (loaded.get("todos", []) or []))
-                elif field == "note":
+                elif fname == "note":
                     hay = str(loaded.get("note", "") or "").lower()
-                elif field == "processes":
+                elif fname == "processes":
                     procs = loaded.get("processes", []) or []
                     hay = " ".join(str(p.get("name", "")).lower() + " " + str(p.get("exe", "")).lower() for p in procs if isinstance(p, dict))
                 else:

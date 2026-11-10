@@ -1,12 +1,14 @@
 from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 from PySide6 import QtCore, QtWidgets
 
 from ctxsnap.i18n import tr
-from ctxsnap.utils import git_title_suggestion
 from ctxsnap.ui.styles import NoScrollComboBox
+from ctxsnap.utils import git_title_suggestion
 
 
 class SnapshotDialog(QtWidgets.QDialog):

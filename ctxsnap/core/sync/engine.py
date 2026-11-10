@@ -7,9 +7,22 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ctxsnap.app_storage import is_valid_snapshot_id, load_json, migrate_snapshot, now_iso, safe_snapshot_path, save_json, save_snapshot_file
+from ctxsnap.app_storage import (
+    is_valid_snapshot_id,
+    load_json,
+    migrate_snapshot,
+    now_iso,
+    safe_snapshot_path,
+    save_json,
+    save_snapshot_file,
+)
 from ctxsnap.constants import APP_NAME
-from ctxsnap.core.sync.base import SyncConflict, SyncPayload, SyncProvider, snapshot_sort_key
+from ctxsnap.core.sync.base import (
+    SyncConflict,
+    SyncPayload,
+    SyncProvider,
+    snapshot_sort_key,
+)
 from ctxsnap.services.snapshot_service import SnapshotService
 from ctxsnap.utils import build_search_blob
 

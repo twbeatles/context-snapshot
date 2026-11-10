@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pyright: reportAttributeAccessIssue=false
-
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,10 +8,24 @@ from typing import Any, Dict, List, Optional, cast
 
 from PySide6 import QtWidgets
 
-from ctxsnap.app_storage import append_restore_history, app_dir, now_iso, save_snapshot_file
+from ctxsnap.app_storage import (
+    app_dir,
+    append_restore_history,
+    now_iso,
+    save_snapshot_file,
+)
 from ctxsnap.i18n import tr
-from ctxsnap.restore import open_folder, open_terminal_at, open_vscode_at, resolve_vscode_target
-from ctxsnap.ui.dialogs.history import CompareDialog, RestoreHistoryDialog, SyncConflictsDialog
+from ctxsnap.restore import (
+    open_folder,
+    open_terminal_at,
+    open_vscode_at,
+    resolve_vscode_target,
+)
+from ctxsnap.ui.dialogs.history import (
+    CompareDialog,
+    RestoreHistoryDialog,
+    SyncConflictsDialog,
+)
 from ctxsnap.ui.dialogs.restore import ChecklistDialog, RestorePreviewDialog
 from ctxsnap.utils import restore_running_apps, safe_parse_datetime
 

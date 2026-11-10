@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 import difflib
 from typing import Any, Callable, Dict, List, Optional
+
 from PySide6 import QtCore, QtWidgets
+
 from ctxsnap.i18n import tr
 from ctxsnap.ui.styles import NoScrollComboBox
 
@@ -83,7 +86,7 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             f"   • Root missing: {'Yes' if entry.get('root_missing') else 'No'}",
             f"   • VSCode opened: {'Yes' if entry.get('vscode_opened') else 'No'}",
         ]
-        self.detail.setText("\n".join(str(l) for l in lines))
+        self.detail.setText("\n".join(str(line) for line in lines))
 
     def _request_restore(self) -> None:
         row = self.listw.currentRow()

@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from typing import List
+
 from PySide6 import QtCore, QtWidgets
+
 from ctxsnap.i18n import tr
 
 

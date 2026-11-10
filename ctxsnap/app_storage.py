@@ -10,7 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ctxsnap.constants import APP_NAME, DEFAULT_PROCESS_KEYWORDS, default_tags_for_language
+from ctxsnap.constants import (
+    APP_NAME,
+    DEFAULT_PROCESS_KEYWORDS,
+    default_tags_for_language,
+)
 from ctxsnap.core.security import SecurityService
 
 LOGGER = logging.getLogger(APP_NAME)

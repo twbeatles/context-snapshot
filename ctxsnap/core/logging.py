@@ -1,9 +1,10 @@
 import logging
-import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
 from ctxsnap.app_storage import app_dir
 from ctxsnap.constants import APP_NAME
+
 
 def setup_logging() -> Path:
     r"""Configure rotating file logs under %APPDATA%\ctxsnap\logs."""

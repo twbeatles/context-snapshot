@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from typing import Any, Dict, List, Optional, cast
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 

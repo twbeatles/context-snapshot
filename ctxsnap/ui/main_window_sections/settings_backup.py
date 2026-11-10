@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # pyright: reportAttributeAccessIssue=false
-
 import copy
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +8,14 @@ from typing import Any, Dict, Optional, Tuple, cast
 
 from PySide6 import QtWidgets
 
-from ctxsnap.app_storage import app_dir, is_valid_snapshot_id, migrate_settings, migrate_snapshot, safe_snapshot_path, save_json
+from ctxsnap.app_storage import (
+    app_dir,
+    is_valid_snapshot_id,
+    migrate_settings,
+    migrate_snapshot,
+    safe_snapshot_path,
+    save_json,
+)
 from ctxsnap.constants import APP_NAME
 from ctxsnap.core.logging import get_logger
 from ctxsnap.i18n import tr
@@ -113,7 +119,7 @@ class MainWindowSettingsBackupSection:
                     "Overwrite",
                     QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
                 )
-                btn_replace = msg.addButton(
+                _btn_replace = msg.addButton(
                     "Replace all",
                     QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
                 )
@@ -241,7 +247,7 @@ class MainWindowSettingsBackupSection:
                 msg.setWindowTitle(tr("Default Root"))
                 msg.setText(tr("Import default root choice"))
                 msg.setInformativeText(f"{tr('Imported')}: {imported_root}\n{tr('Current')}: {current_root}")
-                btn_imported = msg.addButton(tr("Use imported default root"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+                _btn_imported = msg.addButton(tr("Use imported default root"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
                 btn_keep = msg.addButton(tr("Keep current default root"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
                 msg.exec()
                 if msg.clickedButton() == btn_keep:

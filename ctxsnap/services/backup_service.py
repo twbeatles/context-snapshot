@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ctxsnap.app_storage import export_backup_to_file, import_backup_from_file
 

@@ -4,8 +4,8 @@ import ctypes
 import fnmatch
 import logging
 import os
-import subprocess
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime

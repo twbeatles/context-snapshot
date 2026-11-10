@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -12,14 +11,13 @@ from ctxsnap.app_storage import (
     migrate_settings,
     save_json,
 )
-from ctxsnap.constants import APP_NAME
-from ctxsnap.core.logging import setup_logging, get_logger
+from ctxsnap.core.logging import get_logger, setup_logging
 from ctxsnap.i18n import set_language, tr
 from ctxsnap.restore import open_folder
 from ctxsnap.ui.dialogs.onboarding import OnboardingDialog
 from ctxsnap.ui.hotkey import HotkeyFilter, register_hotkey, unregister_hotkey
 from ctxsnap.ui.main_window import MainWindow
-from ctxsnap.ui.styles import set_pretty_style, APP_QSS
+from ctxsnap.ui.styles import APP_QSS, set_pretty_style
 from ctxsnap.utils import log_exc, resource_path
 
 # -------- Logging --------

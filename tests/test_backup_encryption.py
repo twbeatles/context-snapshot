@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from ctxsnap.app_storage import export_backup_to_file, import_backup_from_file, save_json
+from ctxsnap.app_storage import (
+    export_backup_to_file,
+    import_backup_from_file,
+    save_json,
+)
 from ctxsnap.core.security import SecurityService
 
 

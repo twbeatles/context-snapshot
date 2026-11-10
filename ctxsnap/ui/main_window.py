@@ -1,38 +1,31 @@
 from __future__ import annotations
 
-import copy
-import json
-import logging
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, Optional, Set
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ctxsnap.app_storage import (
-    Snapshot,
     app_dir,
     ensure_storage,
-    export_backup_to_file,
     load_json,
     migrate_settings,
     now_iso,
     save_json,
-    save_snapshot_file,
 )
-from ctxsnap.constants import APP_NAME, DEFAULT_TAGS
 from ctxsnap.core.logging import get_logger
 from ctxsnap.core.security import SecurityService
 from ctxsnap.core.sync import SyncEngine
 from ctxsnap.i18n import tr
 from ctxsnap.restore import (
     open_folder,
-    open_vscode_at,
-    resolve_vscode_target,
 )
-from ctxsnap.ui.dialogs.history import CompareDialog, RestoreHistoryDialog
+from ctxsnap.services import (
+    BackupService,
+    RestoreService,
+    SearchService,
+    SnapshotService,
+)
 from ctxsnap.ui.dialogs.onboarding import OnboardingDialog
-from ctxsnap.ui.dialogs.settings import SettingsDialog
 from ctxsnap.ui.main_window_sections import (
     MainWindowAutomationSection,
     MainWindowListViewSection,
@@ -40,14 +33,8 @@ from ctxsnap.ui.main_window_sections import (
     MainWindowSettingsBackupSection,
     MainWindowSnapshotCrudSection,
 )
-from ctxsnap.ui.models import SnapshotListModel, SnapshotItemDelegate
-from ctxsnap.services import BackupService, RestoreService, SearchService, SnapshotService
+from ctxsnap.ui.models import SnapshotItemDelegate, SnapshotListModel
 from ctxsnap.ui.styles import NoScrollComboBox
-from ctxsnap.utils import (
-    git_state_details,
-    log_exc,
-    safe_parse_datetime,
-)
 
 LOGGER = get_logger()
 

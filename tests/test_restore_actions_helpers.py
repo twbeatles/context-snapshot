@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from ctxsnap.ui.main_window_sections.restore_actions import MainWindowRestoreActionsSection
+from ctxsnap.ui.main_window_sections.restore_actions import (
+    MainWindowRestoreActionsSection,
+)
 
 
 def test_snapshot_export_payload_redacts_sensitive_fields() -> None:
