@@ -30,11 +30,17 @@ class LocalSyncProvider(SyncProvider):
             try:
                 payload = json.loads(self.payload_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                raise SyncProviderError(f"Failed to read local sync payload: {exc}") from exc
+                raise SyncProviderError(
+                    f"Failed to read local sync payload: {exc}"
+                ) from exc
         return SyncPayload(
             cursor=str(payload.get("cursor", "") or ""),
-            index=payload.get("index", {"snapshots": [], "tombstones": []}) if isinstance(payload.get("index"), dict) else {"snapshots": [], "tombstones": []},
-            snapshots=payload.get("snapshots", []) if isinstance(payload.get("snapshots"), list) else [],
+            index=payload.get("index", {"snapshots": [], "tombstones": []})
+            if isinstance(payload.get("index"), dict)
+            else {"snapshots": [], "tombstones": []},
+            snapshots=payload.get("snapshots", [])
+            if isinstance(payload.get("snapshots"), list)
+            else [],
         )
 
     def push(self, payload: SyncPayload) -> str:
@@ -45,7 +51,11 @@ class LocalSyncProvider(SyncProvider):
             "snapshots": payload.snapshots,
         }
         try:
-            self.payload_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.payload_path.write_text(
+                json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as exc:
-            raise SyncProviderError(f"Failed to write local sync payload: {exc}") from exc
+            raise SyncProviderError(
+                f"Failed to write local sync payload: {exc}"
+            ) from exc
         return cursor

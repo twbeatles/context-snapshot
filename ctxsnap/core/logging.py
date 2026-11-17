@@ -14,20 +14,23 @@ def setup_logging() -> Path:
 
     logger = logging.getLogger(APP_NAME)
     logger.setLevel(logging.INFO)
-    
+
     # clear existing handlers to avoid duplicates if called multiple times (though practically once)
     if not logger.handlers:
-        handler = RotatingFileHandler(str(log_file), maxBytes=1_000_000, backupCount=5, encoding="utf-8")
+        handler = RotatingFileHandler(
+            str(log_file), maxBytes=1_000_000, backupCount=5, encoding="utf-8"
+        )
         fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
         handler.setFormatter(fmt)
         logger.addHandler(handler)
-        
+
         # Also log to stdout for dev if needed, or if no console attached it goes nowhere
         # console = logging.StreamHandler(sys.stdout)
         # console.setFormatter(fmt)
         # logger.addHandler(console)
 
     return log_file
+
 
 def get_logger() -> logging.Logger:
     return logging.getLogger(APP_NAME)

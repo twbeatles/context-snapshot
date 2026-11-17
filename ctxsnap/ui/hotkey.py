@@ -34,7 +34,9 @@ class HotkeyFilter(QtCore.QObject, QtCore.QAbstractNativeEventFilter):
             return False, 0
 
 
-def register_hotkey(hotkey_id: int, ctrl: bool, alt: bool, shift: bool, vk_letter: str) -> bool:
+def register_hotkey(
+    hotkey_id: int, ctrl: bool, alt: bool, shift: bool, vk_letter: str
+) -> bool:
     mods = 0
     if ctrl:
         mods |= MOD_CONTROL

@@ -29,9 +29,15 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
         self.detail.setReadOnly(True)
         self.detail.setPlaceholderText(tr("Select a restore entry to view details."))
 
-        self._items = history.get("restores", []) if isinstance(history.get("restores"), list) else []
+        self._items = (
+            history.get("restores", [])
+            if isinstance(history.get("restores"), list)
+            else []
+        )
         for entry in self._items:
-            label = f"🕐 {entry.get('created_at','')}  •  {entry.get('snapshot_id','')}"
+            label = (
+                f"🕐 {entry.get('created_at', '')}  •  {entry.get('snapshot_id', '')}"
+            )
             self.listw.addItem(label)
 
         self.listw.currentRowChanged.connect(self._on_select)
@@ -71,8 +77,8 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
             else:
                 failed_count = 0
         lines = [
-            f"📝 Snapshot ID: {entry.get('snapshot_id','')}",
-            f"🕐 Created: {entry.get('created_at','')}",
+            f"📝 Snapshot ID: {entry.get('snapshot_id', '')}",
+            f"🕐 Created: {entry.get('created_at', '')}",
             "",
             "📂 Actions:",
             f"   • Open folder: {'✓' if entry.get('open_folder') else '✗'}",
@@ -100,7 +106,12 @@ class RestoreHistoryDialog(QtWidgets.QDialog):
 
 
 class CompareDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget, snapshots: List[Dict[str, Any]], loader: Callable[[str], Optional[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget,
+        snapshots: List[Dict[str, Any]],
+        loader: Callable[[str], Optional[Dict[str, Any]]],
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Compare Snapshots"))
         self.setModal(True)
@@ -116,11 +127,11 @@ class CompareDialog(QtWidgets.QDialog):
         label_a.setObjectName("SubtitleLabel")
         label_b = QtWidgets.QLabel("B:")
         label_b.setObjectName("SubtitleLabel")
-        
+
         self.left_combo = NoScrollComboBox()
         self.right_combo = NoScrollComboBox()
         for snap in snapshots:
-            label = f"{snap.get('title','')}  •  {snap.get('created_at','')}"
+            label = f"{snap.get('title', '')}  •  {snap.get('created_at', '')}"
             self.left_combo.addItem(label)
             self.right_combo.addItem(label)
 
@@ -145,7 +156,7 @@ class CompareDialog(QtWidgets.QDialog):
         btn_compare.clicked.connect(self._run_compare)
         btn_close = QtWidgets.QPushButton(tr("Close"))
         btn_close.clicked.connect(self.accept)
-        
+
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)
@@ -162,10 +173,10 @@ class CompareDialog(QtWidgets.QDialog):
 
     def _serialize(self, snap: Dict[str, Any]) -> List[str]:
         lines = [
-            f"Title: {snap.get('title','')}",
-            f"Created: {snap.get('created_at','')}",
-            f"Root: {snap.get('root','')}",
-            f"Note: {snap.get('note','')}",
+            f"Title: {snap.get('title', '')}",
+            f"Created: {snap.get('created_at', '')}",
+            f"Root: {snap.get('root', '')}",
+            f"Note: {snap.get('note', '')}",
             "",
             "TODOs:",
         ]
@@ -179,10 +190,20 @@ class CompareDialog(QtWidgets.QDialog):
             lines.append(f"  ... and {len(snap.get('recent_files', [])) - 10} more")
         lines.append("")
         lines.append("Processes:")
-        lines.extend([f"  • {p.get('name','')} → {p.get('exe','')}" for p in snap.get("processes", [])[:10]])
+        lines.extend(
+            [
+                f"  • {p.get('name', '')} → {p.get('exe', '')}"
+                for p in snap.get("processes", [])[:10]
+            ]
+        )
         lines.append("")
         lines.append("Running apps:")
-        lines.extend([f"  • {p.get('name','')} → {p.get('exe','')}" for p in snap.get("running_apps", [])[:10]])
+        lines.extend(
+            [
+                f"  • {p.get('name', '')} → {p.get('exe', '')}"
+                for p in snap.get("running_apps", [])[:10]
+            ]
+        )
         return lines
 
     def _run_compare(self) -> None:
@@ -224,9 +245,13 @@ class SyncConflictsDialog(QtWidgets.QDialog):
         self.detail = QtWidgets.QTextEdit()
         self.detail.setReadOnly(True)
         self.detail.setPlaceholderText(tr("Select a conflict to view details."))
-        self._items = conflicts.get("conflicts", []) if isinstance(conflicts.get("conflicts"), list) else []
+        self._items = (
+            conflicts.get("conflicts", [])
+            if isinstance(conflicts.get("conflicts"), list)
+            else []
+        )
         for entry in self._items:
-            label = f"{entry.get('at','')}  •  {entry.get('snapshot_id','')}  •  {entry.get('reason','')}"
+            label = f"{entry.get('at', '')}  •  {entry.get('snapshot_id', '')}  •  {entry.get('reason', '')}"
             self.listw.addItem(label)
         self.listw.currentRowChanged.connect(self._on_select)
 
@@ -252,8 +277,16 @@ class SyncConflictsDialog(QtWidgets.QDialog):
             self.detail.clear()
             return
         entry = self._items[row]
-        local_payload = entry.get("local_payload") if isinstance(entry.get("local_payload"), dict) else {}
-        remote_payload = entry.get("remote_payload") if isinstance(entry.get("remote_payload"), dict) else {}
+        local_payload = (
+            entry.get("local_payload")
+            if isinstance(entry.get("local_payload"), dict)
+            else {}
+        )
+        remote_payload = (
+            entry.get("remote_payload")
+            if isinstance(entry.get("remote_payload"), dict)
+            else {}
+        )
         lines = [
             f"Snapshot ID: {entry.get('snapshot_id', '')}",
             f"At: {entry.get('at', '')}",

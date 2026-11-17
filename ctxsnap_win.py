@@ -24,7 +24,9 @@ from ctxsnap.utils import log_exc, resource_path
 LOGGER = get_logger()
 
 
-def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSystemTrayIcon:
+def build_tray(
+    app: QtWidgets.QApplication, win: MainWindow
+) -> QtWidgets.QSystemTrayIcon:
     tray = QtWidgets.QSystemTrayIcon(win)
     icon = app.windowIcon()
     tray.setIcon(icon)
@@ -63,9 +65,11 @@ def build_tray(app: QtWidgets.QApplication, win: MainWindow) -> QtWidgets.QSyste
     # keep references for live updates
     tray.act_quick = act_quick  # type: ignore[attr-defined]
     tray.activated.connect(
-        lambda reason: toggle_show()
-        if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger
-        else None
+        lambda reason: (
+            toggle_show()
+            if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger
+            else None
+        )
     )
     tray.show()
     return tray
@@ -120,7 +124,9 @@ def main() -> None:
 
     app_instance = QtCore.QCoreApplication.instance()
     if app_instance is None:
-        LOGGER.warning("QCoreApplication instance is unavailable for native event filter.")
+        LOGGER.warning(
+            "QCoreApplication instance is unavailable for native event filter."
+        )
     else:
         app_instance.installNativeEventFilter(hotkey_filter)
     hotkey_filter.hotkeyPressed.connect(win.quick_snapshot)
@@ -139,8 +145,20 @@ def main() -> None:
             str(hk.get("vk", "S")),
         )
         if ok:
-            mods = "+".join([m for m, on in [("Ctrl", hk.get("ctrl", True)), ("Alt", hk.get("alt", True)), ("Shift", hk.get("shift", False))] if on])
-            win.statusBar().showMessage(f"{tr('Hotkey enabled')}: {mods}+{hk.get('vk','S')}", 3500)
+            mods = "+".join(
+                [
+                    m
+                    for m, on in [
+                        ("Ctrl", hk.get("ctrl", True)),
+                        ("Alt", hk.get("alt", True)),
+                        ("Shift", hk.get("shift", False)),
+                    ]
+                    if on
+                ]
+            )
+            win.statusBar().showMessage(
+                f"{tr('Hotkey enabled')}: {mods}+{hk.get('vk', 'S')}", 3500
+            )
         else:
             win.statusBar().showMessage(tr("Hotkey failed"), 6000)
 
@@ -172,12 +190,22 @@ def main() -> None:
                     ]
                     for cand in candidates:
                         unregister_hotkey(hotkey_id)
-                        if register_hotkey(hotkey_id, cand["ctrl"], cand["alt"], cand["shift"], cand["vk"]):
+                        if register_hotkey(
+                            hotkey_id,
+                            cand["ctrl"],
+                            cand["alt"],
+                            cand["shift"],
+                            cand["vk"],
+                        ):
                             win.settings.setdefault("hotkey", {})
                             win.settings["hotkey"].update({"enabled": True, **cand})
                             if not save_json(win.settings_path, win.settings):
-                                LOGGER.warning("Failed to persist updated hotkey candidate.")
-                            win.statusBar().showMessage(f"{tr('Hotkey updated to')} {win.hotkey_label()}", 4500)
+                                LOGGER.warning(
+                                    "Failed to persist updated hotkey candidate."
+                                )
+                            win.statusBar().showMessage(
+                                f"{tr('Hotkey updated to')} {win.hotkey_label()}", 4500
+                            )
                             break
                 elif dlg.clickedButton() == btn_disable:
                     win.settings.setdefault("hotkey", {})

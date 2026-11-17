@@ -56,7 +56,11 @@ class SnapshotDialog(QtWidgets.QDialog):
         for t in available_tags:
             it = QtWidgets.QListWidgetItem(t)
             it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            it.setCheckState(QtCore.Qt.CheckState.Checked if t in selected_tag_set else QtCore.Qt.CheckState.Unchecked)
+            it.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if t in selected_tag_set
+                else QtCore.Qt.CheckState.Unchecked
+            )
             self.tags_list.addItem(it)
             selected_tag_set.discard(t)
         for t in sorted(selected_tag_set):
@@ -82,7 +86,9 @@ class SnapshotDialog(QtWidgets.QDialog):
         self.template_combo = NoScrollComboBox()
         self.template_combo.addItem(tr("Select template"))
         for tmpl in templates:
-            self.template_combo.addItem(str(tmpl.get("name", "")).strip() or tr("Untitled"))
+            self.template_combo.addItem(
+                str(tmpl.get("name", "")).strip() or tr("Untitled")
+            )
         self.template_apply_btn = QtWidgets.QToolButton()
         self.template_apply_btn.setText(tr("Apply"))
         self.template_apply_btn.clicked.connect(self.apply_template)
@@ -150,7 +156,9 @@ class SnapshotDialog(QtWidgets.QDialog):
         layout.addLayout(btn_row)
 
     def pick_folder(self):
-        path = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Select folder"), self.root_edit.text() or str(Path.home()))
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, tr("Select folder"), self.root_edit.text() or str(Path.home())
+        )
         if path:
             self.root_edit.setText(path)
 
@@ -186,7 +194,9 @@ class SnapshotDialog(QtWidgets.QDialog):
         if sug:
             self.title_edit.setText(sug)
         else:
-            self.title_edit.setText(f"{root.name} - {datetime.now().strftime('%m/%d %H:%M')}")
+            self.title_edit.setText(
+                f"{root.name} - {datetime.now().strftime('%m/%d %H:%M')}"
+            )
 
     def imported_payload(self):
         return self._imported_payload
@@ -202,12 +212,18 @@ class SnapshotDialog(QtWidgets.QDialog):
             return
 
         workspace = self.workspace_edit.text().strip()
-        if workspace and (not Path(workspace).exists() or not Path(workspace).is_file()):
+        if workspace and (
+            not Path(workspace).exists() or not Path(workspace).is_file()
+        ):
             self.err.setText("Workspace file is invalid.")
             return
-        
+
         # TODOS validation
-        todos = [self.todo1.text().strip(), self.todo2.text().strip(), self.todo3.text().strip()]
+        todos = [
+            self.todo1.text().strip(),
+            self.todo2.text().strip(),
+            self.todo3.text().strip(),
+        ]
         if self.todos_enabled and self.enforce_todos:
             if any(not t for t in todos):
                 self.err.setText(tr("Todos required"))
@@ -219,7 +235,11 @@ class SnapshotDialog(QtWidgets.QDialog):
         title = self.title_edit.text().strip()
         workspace = self.workspace_edit.text().strip()
         note = self.note_edit.toPlainText().strip()
-        todos = [self.todo1.text().strip(), self.todo2.text().strip(), self.todo3.text().strip()]
+        todos = [
+            self.todo1.text().strip(),
+            self.todo2.text().strip(),
+            self.todo3.text().strip(),
+        ]
 
         tags: List[str] = []
         for i in range(self.tags_list.count()):
@@ -229,10 +249,19 @@ class SnapshotDialog(QtWidgets.QDialog):
         if not title:
             # fallback suggestion logic if empty
             sug = git_title_suggestion(Path(root))
-            title = sug or f"{Path(root).name} - {datetime.now().strftime('%m/%d %H:%M')}"
+            title = (
+                sug or f"{Path(root).name} - {datetime.now().strftime('%m/%d %H:%M')}"
+            )
         if not self.todos_enabled:
             todos = ["", "", ""]
-        return {"root": root, "title": title, "workspace": workspace, "note": note, "todos": todos, "tags": tags}
+        return {
+            "root": root,
+            "title": title,
+            "workspace": workspace,
+            "note": note,
+            "todos": todos,
+            "tags": tags,
+        }
 
     def apply_template(self):
         idx = self.template_combo.currentIndex() - 1
@@ -261,7 +290,7 @@ class SnapshotDialog(QtWidgets.QDialog):
 
 class EditSnapshotDialog(SnapshotDialog):
     """Dialog for editing an existing snapshot."""
-    
+
     def __init__(
         self,
         parent: QtWidgets.QWidget,
@@ -283,12 +312,12 @@ class EditSnapshotDialog(SnapshotDialog):
         )
         self.setWindowTitle(tr("Edit Snapshot"))
         self._snapshot_id = snapshot.get("id", "")
-        
+
         # Populate fields with existing data
         self.title_edit.setText(snapshot.get("title", ""))
         self.workspace_edit.setText(snapshot.get("vscode_workspace", ""))
         self.note_edit.setText(snapshot.get("note", ""))
-        
+
         todos = snapshot.get("todos", [])
         if len(todos) >= 1:
             self.todo1.setText(todos[0])
@@ -296,7 +325,7 @@ class EditSnapshotDialog(SnapshotDialog):
             self.todo2.setText(todos[1])
         if len(todos) >= 3:
             self.todo3.setText(todos[2])
-        
+
         # Check existing tags
         existing_tags = set(snapshot.get("tags", []))
         for i in range(self.tags_list.count()):
@@ -304,13 +333,13 @@ class EditSnapshotDialog(SnapshotDialog):
             if it.text() in existing_tags:
                 it.setCheckState(QtCore.Qt.CheckState.Checked)
                 existing_tags.discard(it.text())
-        
+
         # Add any tags that weren't in the available list
         for tag in existing_tags:
             it = QtWidgets.QListWidgetItem(tag)
             it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(QtCore.Qt.CheckState.Checked)
             self.tags_list.addItem(it)
-    
+
     def snapshot_id(self) -> str:
         return self._snapshot_id

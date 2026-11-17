@@ -101,7 +101,17 @@ class MainWindow(
         a_open_folder.triggered.connect(self.open_app_folder)
         a_quit = QtGui.QAction(tr("Quit"), self)
         a_quit.triggered.connect(self.request_quit)
-        for a in [a_new, a_quick, None, a_restore, a_restore_last, None, a_open_folder, None, a_quit]:
+        for a in [
+            a_new,
+            a_quick,
+            None,
+            a_restore,
+            a_restore_last,
+            None,
+            a_open_folder,
+            None,
+            a_quit,
+        ]:
             if a is None:
                 m_file.addSeparator()
             else:
@@ -112,7 +122,9 @@ class MainWindow(
         a_settings.triggered.connect(self.open_settings)
         a_sync = QtGui.QAction(tr("Sync Now"), self)
         a_sync.triggered.connect(self._run_scheduled_sync)
-        a_sync.setEnabled(bool(self.settings.get("dev_flags", {}).get("sync_enabled", False)))
+        a_sync.setEnabled(
+            bool(self.settings.get("dev_flags", {}).get("sync_enabled", False))
+        )
         a_export_snap = QtGui.QAction(tr("Export Selected Snapshot"), self)
         a_export_snap.triggered.connect(self.export_selected_snapshot)
         a_report = QtGui.QAction(tr("Export Weekly Report"), self)
@@ -227,7 +239,7 @@ class MainWindow(
             if "search_blob_mtime" not in it:
                 it["search_blob_mtime"] = 0.0
                 changed = True
-        
+
         if "schema_version" not in self.index:
             changed = True
         if "search_meta" not in self.index:
@@ -238,7 +250,7 @@ class MainWindow(
             changed = True
         if "updated_at" not in self.index:
             changed = True
-            
+
         if changed:
             self.index = self.snapshot_service.touch_index(self.index)
             if not save_json(self.index_path, self.index):
@@ -255,7 +267,9 @@ class MainWindow(
         self.search.textChanged.connect(self._reset_pagination_and_refresh)
         self.search.textChanged.connect(lambda _text: self._refresh_saved_query_combo())
         self.saved_query_combo = NoScrollComboBox()
-        self.saved_query_combo.currentIndexChanged.connect(self._apply_saved_query_choice)
+        self.saved_query_combo.currentIndexChanged.connect(
+            self._apply_saved_query_choice
+        )
         self._refresh_saved_query_combo()
         self.search_btn_clear = QtWidgets.QToolButton()
         self.search_btn_clear.setText(tr("Clear"))
@@ -292,7 +306,7 @@ class MainWindow(
 
         # List Stack (for Empty State)
         self.list_stack = QtWidgets.QStackedWidget()
-        
+
         self.listw = QtWidgets.QListView()
         self.listw.setUniformItemSizes(False)
         self.listw.setSelectionMode(
@@ -300,28 +314,30 @@ class MainWindow(
         )
         self.listw.setWordWrap(True)
         self.listw.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
-        
+
         self.item_delegate = SnapshotItemDelegate(self.listw)
         self.listw.setItemDelegate(self.item_delegate)
-        
+
         self.list_model = SnapshotListModel(self)
         self.listw.setModel(self.list_model)
         self.listw.selectionModel().currentChanged.connect(self.on_select)
-        
+
         self.list_stack.addWidget(self.listw)
-        
+
         self.empty_state = QtWidgets.QWidget()
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state)
         empty_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_icon = QtWidgets.QLabel("📭")
         empty_icon.setStyleSheet("font-size: 48px; color: #606078;")
         empty_icon.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        empty_text = QtWidgets.QLabel(tr("No snapshots found.\nPress 'New Snapshot' to create one."))
+        empty_text = QtWidgets.QLabel(
+            tr("No snapshots found.\nPress 'New Snapshot' to create one.")
+        )
         empty_text.setStyleSheet("font-size: 14px; color: #9090a8;")
         empty_text.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_icon)
         empty_layout.addWidget(empty_text)
-        
+
         self.list_stack.addWidget(self.empty_state)
 
         # Detail View
@@ -337,21 +353,23 @@ class MainWindow(
         # Buttons
         btn_new = QtWidgets.QPushButton(tr("New Snapshot"))
         btn_new.setProperty("primary", True)
-        self.btn_quick = QtWidgets.QPushButton(f"{tr('Quick Snapshot')} ({self.hotkey_label()})")
+        self.btn_quick = QtWidgets.QPushButton(
+            f"{tr('Quick Snapshot')} ({self.hotkey_label()})"
+        )
         btn_settings = QtWidgets.QPushButton("⚙ " + tr("Settings"))
-        
+
         btn_restore = QtWidgets.QPushButton("▶ " + tr("Restore"))
         btn_restore.setProperty("primary", True)
         btn_restore_last = QtWidgets.QPushButton(tr("Restore Last"))
-        
+
         btn_edit = QtWidgets.QPushButton("✏ " + tr("Edit"))
         btn_pin = QtWidgets.QPushButton("📌 " + tr("Pin / Unpin"))
         btn_archive = QtWidgets.QPushButton("🗄 " + tr("Archive / Unarchive"))
         btn_compare = QtWidgets.QPushButton(tr("Compare"))
-        
+
         btn_open_root = QtWidgets.QPushButton("📁 " + tr("Open Root Folder"))
         btn_open_vscode = QtWidgets.QPushButton("💻 " + tr("Open in VSCode"))
-        
+
         btn_delete = QtWidgets.QPushButton("🗑 " + tr("Delete"))
         btn_delete.setProperty("danger", True)
 
@@ -368,21 +386,21 @@ class MainWindow(
         btn_pin.clicked.connect(self.toggle_pin)
         btn_archive.clicked.connect(self.toggle_archive)
         btn_compare.clicked.connect(self.open_compare_dialog)
-        
+
         self._setup_shortcuts()
 
         # Layout
         left = QtWidgets.QVBoxLayout()
         left.setContentsMargins(12, 12, 6, 12)
         left.setSpacing(10)
-        
+
         search_row = QtWidgets.QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self.search, 1)
         search_row.addWidget(self.saved_query_combo)
         search_row.addWidget(self.search_btn_clear)
         search_row.addWidget(self.tag_filter_btn)
-        
+
         filter_row = QtWidgets.QHBoxLayout()
         filter_row.setSpacing(8)
         filter_row.addWidget(self.days_filter)
@@ -390,15 +408,15 @@ class MainWindow(
         filter_row.addWidget(self.pinned_only)
         filter_row.addWidget(self.show_archived)
         filter_row.addStretch(1)
-        
+
         left.addLayout(search_row)
         left.addLayout(filter_row)
         left.addWidget(self.list_stack, 1)
-        
+
         self.result_label = QtWidgets.QLabel("")
         self.result_label.setObjectName("HintLabel")
         left.addWidget(self.result_label)
-        
+
         page_row = QtWidgets.QHBoxLayout()
         page_row.setSpacing(6)
         self.page_prev_btn = QtWidgets.QToolButton()
@@ -414,7 +432,7 @@ class MainWindow(
         page_row.addStretch(1)
         page_row.addWidget(self.page_label)
         left.addLayout(page_row)
-        
+
         left_btns = QtWidgets.QHBoxLayout()
         left_btns.setSpacing(8)
         left_btns.addWidget(btn_new)
@@ -482,7 +500,7 @@ class MainWindow(
         self.git_timer.setInterval(60_000)
         self.git_timer.timeout.connect(self._check_git_change)
         self._last_git_state = None
-        
+
         self._init_sync_engine()
         self._update_auto_snapshot_timer()
         self._update_backup_timer()
@@ -502,13 +520,13 @@ class MainWindow(
             return
 
         self._is_closing = True
-        
+
         # Stop all timers
         self.auto_timer.stop()
         self.backup_timer.stop()
         self.sync_timer.stop()
         self.git_timer.stop()
-        
+
         # Stop all background workers
         for sid, thread in list(self._recent_workers.items()):
             try:
@@ -520,20 +538,38 @@ class MainWindow(
             except Exception as e:
                 LOGGER.exception("Error stopping worker thread %s: %s", sid, e)
         self._recent_workers.clear()
-        
+
         event.accept()
 
     def _setup_shortcuts(self) -> None:
         """Set up in-app keyboard shortcuts."""
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+N"), self).activated.connect(self.new_snapshot)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+E"), self).activated.connect(self.edit_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self).activated.connect(self.delete_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+R"), self).activated.connect(self.restore_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Return"), self).activated.connect(self.restore_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self).activated.connect(lambda: self.search.setFocus())
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+,"), self).activated.connect(self.open_settings)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+P"), self).activated.connect(self.toggle_pin)
-        QtGui.QShortcut(QtGui.QKeySequence("Escape"), self).activated.connect(self._clear_search)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+N"), self).activated.connect(
+            self.new_snapshot
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+E"), self).activated.connect(
+            self.edit_selected
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self).activated.connect(
+            self.delete_selected
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+R"), self).activated.connect(
+            self.restore_selected
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Return"), self).activated.connect(
+            self.restore_selected
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+F"), self).activated.connect(
+            lambda: self.search.setFocus()
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+,"), self).activated.connect(
+            self.open_settings
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+P"), self).activated.connect(
+            self.toggle_pin
+        )
+        QtGui.QShortcut(QtGui.QKeySequence("Escape"), self).activated.connect(
+            self._clear_search
+        )
 
     def open_settings(self) -> None:
         MainWindowSettingsBackupSection.open_settings(self)

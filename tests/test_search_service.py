@@ -5,7 +5,9 @@ from ctxsnap.services.search_service import SearchService
 
 def test_parse_with_field_query_enabled() -> None:
     svc = SearchService()
-    parsed = svc.parse('tag:work root:project todo:"write tests" plain', field_enabled=True)
+    parsed = svc.parse(
+        'tag:work root:project todo:"write tests" plain', field_enabled=True
+    )
     assert parsed.fields["tags"] == ["work"]
     assert parsed.fields["root"] == ["project"]
     assert parsed.fields["todos"] == ["write tests"]
@@ -14,7 +16,7 @@ def test_parse_with_field_query_enabled() -> None:
 
 def test_match_item_with_loader_for_field_tokens() -> None:
     svc = SearchService()
-    parsed = svc.parse('todo:refactor tag:work', field_enabled=True)
+    parsed = svc.parse("todo:refactor tag:work", field_enabled=True)
     item = {
         "id": "s1",
         "title": "feature work",
@@ -37,7 +39,13 @@ def test_match_item_with_loader_for_field_tokens() -> None:
 def test_field_query_disabled_treats_token_as_plain_term() -> None:
     svc = SearchService()
     parsed = svc.parse("tag:work", field_enabled=False)
-    item = {"id": "x", "title": "tag:work done", "root": "", "tags": [], "search_blob": ""}
+    item = {
+        "id": "x",
+        "title": "tag:work done",
+        "root": "",
+        "tags": [],
+        "search_blob": "",
+    }
     assert svc.matches_item(item, parsed, load_snapshot=None) is True
 
 
@@ -58,10 +66,18 @@ def test_free_text_search_can_match_runtime_decrypted_snapshot_without_cache() -
     assert svc.matches_item(item, parsed, load_snapshot=loader) is True
 
 
-def test_free_text_search_uses_runtime_snapshot_even_when_cache_has_public_blob() -> None:
+def test_free_text_search_uses_runtime_snapshot_even_when_cache_has_public_blob() -> (
+    None
+):
     svc = SearchService()
     parsed = svc.parse("secret-note", field_enabled=True)
-    item = {"id": "x", "title": "plain", "root": "", "tags": [], "search_blob": "C:/repo/public.py"}
+    item = {
+        "id": "x",
+        "title": "plain",
+        "root": "",
+        "tags": [],
+        "search_blob": "C:/repo/public.py",
+    }
 
     def loader(_: str):
         return {

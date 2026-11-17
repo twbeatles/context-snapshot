@@ -20,10 +20,22 @@ def test_migrate_settings_adds_new_schema_and_feature_flags() -> None:
 
 
 def test_default_tags_follow_language_without_overwriting_existing_tags() -> None:
-    assert default_tags_for_language("en") == ["Work", "Personal", "Real Estate", "Settlement"]
+    assert default_tags_for_language("en") == [
+        "Work",
+        "Personal",
+        "Real Estate",
+        "Settlement",
+    ]
     assert default_tags_for_language("ko") == ["업무", "개인", "부동산", "정산"]
-    assert migrate_settings({"language": "en"})["tags"] == ["Work", "Personal", "Real Estate", "Settlement"]
-    assert migrate_settings({"language": "en", "tags": ["custom"]})["tags"] == ["custom"]
+    assert migrate_settings({"language": "en"})["tags"] == [
+        "Work",
+        "Personal",
+        "Real Estate",
+        "Settlement",
+    ]
+    assert migrate_settings({"language": "en", "tags": ["custom"]})["tags"] == [
+        "custom"
+    ]
 
 
 @pytest.mark.parametrize("sid", ["../x", "a/b", r"a\b", "C:escape", ""])
@@ -67,9 +79,21 @@ def test_latest_snapshot_item_prefers_created_at_then_updated_at_then_id() -> No
     service = SnapshotService()
     item = service.latest_snapshot_item(
         [
-            {"id": "a", "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-02T00:00:00"},
-            {"id": "c", "created_at": "2026-01-03T00:00:00", "updated_at": "2026-01-03T00:00:00"},
-            {"id": "b", "created_at": "2026-01-03T00:00:00", "updated_at": "2026-01-04T00:00:00"},
+            {
+                "id": "a",
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-02T00:00:00",
+            },
+            {
+                "id": "c",
+                "created_at": "2026-01-03T00:00:00",
+                "updated_at": "2026-01-03T00:00:00",
+            },
+            {
+                "id": "b",
+                "created_at": "2026-01-03T00:00:00",
+                "updated_at": "2026-01-04T00:00:00",
+            },
         ]
     )
     assert item is not None

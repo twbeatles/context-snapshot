@@ -12,7 +12,10 @@ class RestoreService:
     @staticmethod
     def _normalize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
         out = deepcopy(profile if isinstance(profile, dict) else {})
-        out["name"] = str(out.get("name") or RestoreService.DEFAULT_PROFILE_NAME).strip() or RestoreService.DEFAULT_PROFILE_NAME
+        out["name"] = (
+            str(out.get("name") or RestoreService.DEFAULT_PROFILE_NAME).strip()
+            or RestoreService.DEFAULT_PROFILE_NAME
+        )
         out["open_folder"] = bool(out.get("open_folder", True))
         out["open_terminal"] = bool(out.get("open_terminal", True))
         out["open_vscode"] = bool(out.get("open_vscode", True))
@@ -21,7 +24,9 @@ class RestoreService:
         out["default"] = bool(out.get("default", False))
         return out
 
-    def normalize_profiles(self, profiles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def normalize_profiles(
+        self, profiles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         seen_names = set()
         for raw in profiles or []:
@@ -41,7 +46,9 @@ class RestoreService:
             "open_terminal": bool(restore_cfg.get("open_terminal", True)),
             "open_vscode": bool(restore_cfg.get("open_vscode", True)),
             "open_running_apps": bool(restore_cfg.get("open_running_apps", False)),
-            "show_checklist": bool(restore_cfg.get("show_post_restore_checklist", True)),
+            "show_checklist": bool(
+                restore_cfg.get("show_post_restore_checklist", True)
+            ),
             "profile_name": "",
         }
 
@@ -67,7 +74,9 @@ class RestoreService:
         )
         return defaults
 
-    def apply_profile(self, settings: Dict[str, Any], profile_name: str, choices: Dict[str, Any]) -> Dict[str, Any]:
+    def apply_profile(
+        self, settings: Dict[str, Any], profile_name: str, choices: Dict[str, Any]
+    ) -> Dict[str, Any]:
         out = deepcopy(choices)
         profiles = self.normalize_profiles(settings.get("restore_profiles", []))
         if not profiles:
@@ -75,10 +84,20 @@ class RestoreService:
         selected = next((p for p in profiles if p.get("name") == profile_name), None)
         if not selected:
             return out
-        out["open_folder"] = bool(selected.get("open_folder", out.get("open_folder", True)))
-        out["open_terminal"] = bool(selected.get("open_terminal", out.get("open_terminal", True)))
-        out["open_vscode"] = bool(selected.get("open_vscode", out.get("open_vscode", True)))
-        out["open_running_apps"] = bool(selected.get("open_running_apps", out.get("open_running_apps", False)))
-        out["show_checklist"] = bool(selected.get("show_checklist", out.get("show_checklist", True)))
+        out["open_folder"] = bool(
+            selected.get("open_folder", out.get("open_folder", True))
+        )
+        out["open_terminal"] = bool(
+            selected.get("open_terminal", out.get("open_terminal", True))
+        )
+        out["open_vscode"] = bool(
+            selected.get("open_vscode", out.get("open_vscode", True))
+        )
+        out["open_running_apps"] = bool(
+            selected.get("open_running_apps", out.get("open_running_apps", False))
+        )
+        out["show_checklist"] = bool(
+            selected.get("show_checklist", out.get("show_checklist", True))
+        )
         out["profile_name"] = selected.get("name", "")
         return out

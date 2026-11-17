@@ -82,7 +82,9 @@ class SearchService:
             cached_hay = base_hay + " " + str(item.get("search_blob", "")).lower()
             if not self._contains_all(cached_hay, parsed.terms):
                 loaded = ensure_snapshot()
-                runtime_hay = base_hay + " " + self.build_blob_if_missing(item, loaded).lower()
+                runtime_hay = (
+                    base_hay + " " + self.build_blob_if_missing(item, loaded).lower()
+                )
                 if not self._contains_all(runtime_hay, parsed.terms):
                     return False
 
@@ -105,15 +107,29 @@ class SearchService:
                 if not loaded:
                     return False
                 if fname == "todos":
-                    hay = " ".join(str(x).lower() for x in (loaded.get("todos", []) or []))
+                    hay = " ".join(
+                        str(x).lower() for x in (loaded.get("todos", []) or [])
+                    )
                 elif fname == "note":
                     hay = str(loaded.get("note", "") or "").lower()
                 elif fname == "processes":
                     procs = loaded.get("processes", []) or []
-                    hay = " ".join(str(p.get("name", "")).lower() + " " + str(p.get("exe", "")).lower() for p in procs if isinstance(p, dict))
+                    hay = " ".join(
+                        str(p.get("name", "")).lower()
+                        + " "
+                        + str(p.get("exe", "")).lower()
+                        for p in procs
+                        if isinstance(p, dict)
+                    )
                 else:
                     apps = loaded.get("running_apps", []) or []
-                    hay = " ".join(str(a.get("name", "")).lower() + " " + str(a.get("exe", "")).lower() for a in apps if isinstance(a, dict))
+                    hay = " ".join(
+                        str(a.get("name", "")).lower()
+                        + " "
+                        + str(a.get("exe", "")).lower()
+                        for a in apps
+                        if isinstance(a, dict)
+                    )
                 if not self._contains_all(hay, values):
                     return False
             else:
@@ -122,7 +138,9 @@ class SearchService:
 
         return True
 
-    def build_blob_if_missing(self, item: Dict[str, Any], snap: Optional[Dict[str, Any]]) -> str:
+    def build_blob_if_missing(
+        self, item: Dict[str, Any], snap: Optional[Dict[str, Any]]
+    ) -> str:
         cached = str(item.get("search_blob") or "")
         if not snap:
             return cached

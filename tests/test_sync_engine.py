@@ -9,7 +9,9 @@ from ctxsnap.core.sync.engine import SyncEngine
 from ctxsnap.core.sync.providers.local import LocalSyncProvider
 
 
-def _write_snapshot(path: Path, sid: str, title: str, rev: int, updated_at: str) -> dict:
+def _write_snapshot(
+    path: Path, sid: str, title: str, rev: int, updated_at: str
+) -> dict:
     snap = {
         "id": sid,
         "title": title,
@@ -42,19 +44,32 @@ def test_sync_prefers_higher_revision(tmp_path: Path) -> None:
     snaps = base / "snapshots"
     snaps.mkdir(parents=True, exist_ok=True)
     index_path = base / "index.json"
-    save_json(index_path, {"snapshots": [], "schema_version": 2, "rev": 1, "updated_at": "2026-01-01T00:00:00", "search_meta": {}})
+    save_json(
+        index_path,
+        {
+            "snapshots": [],
+            "schema_version": 2,
+            "rev": 1,
+            "updated_at": "2026-01-01T00:00:00",
+            "search_meta": {},
+        },
+    )
 
     _write_snapshot(snaps, "s1", "local-old", 1, "2026-01-01T00:00:00")
 
     remote_root = tmp_path / "remote"
     provider = LocalSyncProvider(remote_root)
-    remote_snap = _write_snapshot(tmp_path, "s1", "remote-new", 2, "2026-01-02T00:00:00")
+    remote_snap = _write_snapshot(
+        tmp_path, "s1", "remote-new", 2, "2026-01-02T00:00:00"
+    )
     payload = {
         "cursor": "",
         "index": {"snapshots": []},
         "snapshots": [remote_snap],
     }
-    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (remote_root / "remote_payload.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     engine = SyncEngine(
         provider=provider,
@@ -75,7 +90,16 @@ def test_sync_records_conflict_for_same_rev_and_timestamp(tmp_path: Path) -> Non
     snaps = base / "snapshots"
     snaps.mkdir(parents=True, exist_ok=True)
     index_path = base / "index.json"
-    save_json(index_path, {"snapshots": [], "schema_version": 2, "rev": 1, "updated_at": "2026-01-01T00:00:00", "search_meta": {}})
+    save_json(
+        index_path,
+        {
+            "snapshots": [],
+            "schema_version": 2,
+            "rev": 1,
+            "updated_at": "2026-01-01T00:00:00",
+            "search_meta": {},
+        },
+    )
 
     _write_snapshot(snaps, "s1", "local-a", 2, "2026-01-03T00:00:00")
 
@@ -83,7 +107,9 @@ def test_sync_records_conflict_for_same_rev_and_timestamp(tmp_path: Path) -> Non
     provider = LocalSyncProvider(remote_root)
     remote_snap = _write_snapshot(tmp_path, "s1", "remote-b", 2, "2026-01-03T00:00:00")
     payload = {"cursor": "", "index": {"snapshots": []}, "snapshots": [remote_snap]}
-    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (remote_root / "remote_payload.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     engine = SyncEngine(
         provider=provider,
@@ -98,11 +124,15 @@ def test_sync_records_conflict_for_same_rev_and_timestamp(tmp_path: Path) -> Non
     assert conflicts["conflicts"][0]["snapshot_id"] == "s1"
     assert conflicts["conflicts"][0]["local_payload"]["title"] == "local-a"
     assert conflicts["conflicts"][0]["remote_payload"]["title"] == "remote-b"
-    remote_after = json.loads((remote_root / "remote_payload.json").read_text(encoding="utf-8"))
+    remote_after = json.loads(
+        (remote_root / "remote_payload.json").read_text(encoding="utf-8")
+    )
     assert remote_after["snapshots"][0]["title"] == "remote-b"
 
 
-def test_sync_applies_remote_tombstone_and_removes_local_snapshot(tmp_path: Path) -> None:
+def test_sync_applies_remote_tombstone_and_removes_local_snapshot(
+    tmp_path: Path,
+) -> None:
     base = tmp_path / "local"
     snaps = base / "snapshots"
     snaps.mkdir(parents=True, exist_ok=True)
@@ -126,10 +156,15 @@ def test_sync_applies_remote_tombstone_and_removes_local_snapshot(tmp_path: Path
     deleted_at = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
     payload = {
         "cursor": "",
-        "index": {"snapshots": [], "tombstones": [{"id": "s1", "deleted_at": deleted_at}]},
+        "index": {
+            "snapshots": [],
+            "tombstones": [{"id": "s1", "deleted_at": deleted_at}],
+        },
         "snapshots": [],
     }
-    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (remote_root / "remote_payload.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     engine = SyncEngine(
         provider=provider,
@@ -164,8 +199,14 @@ def test_sync_prunes_old_tombstones(tmp_path: Path) -> None:
 
     remote_root = tmp_path / "remote"
     provider = LocalSyncProvider(remote_root)
-    payload = {"cursor": "", "index": {"snapshots": [], "tombstones": []}, "snapshots": []}
-    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = {
+        "cursor": "",
+        "index": {"snapshots": [], "tombstones": []},
+        "snapshots": [],
+    }
+    (remote_root / "remote_payload.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     engine = SyncEngine(
         provider=provider,
@@ -184,16 +225,29 @@ def test_sync_skips_remote_snapshot_with_unsafe_id(tmp_path: Path) -> None:
     snaps = base / "snapshots"
     snaps.mkdir(parents=True, exist_ok=True)
     index_path = base / "index.json"
-    save_json(index_path, {"snapshots": [], "schema_version": 2, "rev": 1, "updated_at": "2026-01-01T00:00:00", "search_meta": {}})
+    save_json(
+        index_path,
+        {
+            "snapshots": [],
+            "schema_version": 2,
+            "rev": 1,
+            "updated_at": "2026-01-01T00:00:00",
+            "search_meta": {},
+        },
+    )
 
     remote_root = tmp_path / "remote"
     provider = LocalSyncProvider(remote_root)
     payload = {
         "cursor": "",
         "index": {"snapshots": []},
-        "snapshots": [{"id": "../evil", "title": "bad", "created_at": "2026-01-01T00:00:00"}],
+        "snapshots": [
+            {"id": "../evil", "title": "bad", "created_at": "2026-01-01T00:00:00"}
+        ],
     }
-    (remote_root / "remote_payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (remote_root / "remote_payload.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     engine = SyncEngine(
         provider=provider,

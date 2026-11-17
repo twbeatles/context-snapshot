@@ -95,7 +95,13 @@ def _default_settings() -> Dict[str, Any]:
         "recent_files_limit": 30,
         "restore_preview_default": True,
         "tags": default_tags_for_language("auto"),
-        "hotkey": {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"},
+        "hotkey": {
+            "enabled": True,
+            "ctrl": True,
+            "alt": True,
+            "shift": False,
+            "vk": "S",
+        },
         "capture": {"recent_files": True, "processes": True, "running_apps": True},
         "capture_note": True,
         "capture_todos": True,
@@ -163,11 +169,19 @@ def ensure_storage() -> Tuple[Path, Path, Path]:
     sync_state_path = base / "sync_state.json"
 
     if not index_path.exists():
-        index_path.write_text(json.dumps(_default_index(), ensure_ascii=False, indent=2), encoding="utf-8")
+        index_path.write_text(
+            json.dumps(_default_index(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     if not settings_path.exists():
-        settings_path.write_text(json.dumps(_default_settings(), ensure_ascii=False, indent=2), encoding="utf-8")
+        settings_path.write_text(
+            json.dumps(_default_settings(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     if not conflicts_path.exists():
-        conflicts_path.write_text(json.dumps({"conflicts": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+        conflicts_path.write_text(
+            json.dumps({"conflicts": []}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     if not sync_state_path.exists():
         sync_state_path.write_text(
             json.dumps(
@@ -220,7 +234,9 @@ def save_json(p: Path, data: Dict[str, Any]) -> bool:
     try:
         content = json.dumps(data, ensure_ascii=False, indent=2)
         p.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(suffix=".tmp", prefix=p.stem + "_", dir=str(p.parent))
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp", prefix=p.stem + "_", dir=str(p.parent)
+        )
         fd_closed = False
         try:
             os.write(fd, content.encode("utf-8"))
@@ -309,9 +325,14 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     settings.setdefault("recent_files_limit", 30)
     settings.setdefault("restore_preview_default", True)
     settings.setdefault("language", "auto")
-    settings.setdefault("tags", default_tags_for_language(str(settings.get("language", "auto"))))
+    settings.setdefault(
+        "tags", default_tags_for_language(str(settings.get("language", "auto")))
+    )
 
-    hotkey = settings.setdefault("hotkey", {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"})
+    hotkey = settings.setdefault(
+        "hotkey",
+        {"enabled": True, "ctrl": True, "alt": True, "shift": False, "vk": "S"},
+    )
     if not isinstance(hotkey, dict):
         hotkey = {}
         settings["hotkey"] = hotkey
@@ -321,7 +342,9 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     hotkey.setdefault("shift", False)
     hotkey.setdefault("vk", "S")
 
-    capture = settings.setdefault("capture", {"recent_files": True, "processes": True, "running_apps": True})
+    capture = settings.setdefault(
+        "capture", {"recent_files": True, "processes": True, "running_apps": True}
+    )
     if not isinstance(capture, dict):
         capture = {}
         settings["capture"] = capture
@@ -329,7 +352,9 @@ def migrate_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     capture.setdefault("processes", True)
     capture.setdefault("running_apps", True)
 
-    settings.setdefault("recent_files_exclude", [".git", "node_modules", "venv", "dist", "build"])
+    settings.setdefault(
+        "recent_files_exclude", [".git", "node_modules", "venv", "dist", "build"]
+    )
     settings.setdefault("recent_files_scan_limit", 20000)
     settings.setdefault("recent_files_scan_seconds", 2.0)
     settings.setdefault("recent_files_background", False)
@@ -392,7 +417,11 @@ def export_settings_to_file(path: Path, settings: Dict[str, Any]) -> None:
 
 def import_settings_from_file(path: Path) -> Dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, dict) and "settings" in data and isinstance(data["settings"], dict):
+    if (
+        isinstance(data, dict)
+        and "settings" in data
+        and isinstance(data["settings"], dict)
+    ):
         data = data["settings"]
     if not isinstance(data, dict):
         raise ValueError("Invalid settings format")
@@ -433,7 +462,9 @@ def export_backup_to_file(
         snaps: List[Dict[str, Any]] = []
         for f in sorted(snaps_dir.glob("*.json")):
             try:
-                snaps.append(migrate_snapshot(json.loads(f.read_text(encoding="utf-8"))))
+                snaps.append(
+                    migrate_snapshot(json.loads(f.read_text(encoding="utf-8")))
+                )
             except Exception as exc:
                 LOGGER.exception("read snapshot %s: %s", f.name, exc)
                 continue
@@ -444,7 +475,9 @@ def export_backup_to_file(
     if encrypt_backup:
         security = SecurityService()
         wrapped = security.encrypt_backup_payload(payload)
-        path.write_text(json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return
 
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

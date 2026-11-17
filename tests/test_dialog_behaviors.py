@@ -23,7 +23,9 @@ def _app() -> QtWidgets.QApplication:
     return _APP
 
 
-def test_snapshot_dialog_accepts_empty_todos_when_todo_capture_disabled(tmp_path: Path) -> None:
+def test_snapshot_dialog_accepts_empty_todos_when_todo_capture_disabled(
+    tmp_path: Path,
+) -> None:
     _app()
     parent = QtWidgets.QWidget()
     dlg = SnapshotDialog(

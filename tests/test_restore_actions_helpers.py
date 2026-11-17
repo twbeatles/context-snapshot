@@ -22,7 +22,9 @@ def test_snapshot_export_payload_redacts_sensitive_fields() -> None:
         "auto_fingerprint": "abc",
         "tags": ["private"],
     }
-    redacted = MainWindowRestoreActionsSection._snapshot_export_payload(snap, redacted=True)
+    redacted = MainWindowRestoreActionsSection._snapshot_export_payload(
+        snap, redacted=True
+    )
     assert "note" not in redacted
     assert "todos" not in redacted
     assert "processes" not in redacted

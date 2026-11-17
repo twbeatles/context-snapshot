@@ -24,7 +24,7 @@ class OnboardingDialog(QtWidgets.QDialog):
         header = QtWidgets.QLabel("🚀 " + tr("Welcome to CtxSnap"))
         header.setObjectName("TitleLabel")
         header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        
+
         sub = QtWidgets.QLabel(tr("Onboarding header"))
         sub.setObjectName("HintLabel")
         sub.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -44,7 +44,7 @@ class OnboardingDialog(QtWidgets.QDialog):
         self.btn_next.setProperty("primary", True)
         self.btn_finish = QtWidgets.QPushButton("✓ " + tr("Finish"))
         self.btn_finish.setProperty("primary", True)
-        
+
         self.btn_back.clicked.connect(self._back)
         self.btn_next.clicked.connect(self._next)
         self.btn_finish.clicked.connect(self.accept)
@@ -71,13 +71,13 @@ class OnboardingDialog(QtWidgets.QDialog):
 
     def _mk_page(self, title: str, body_html: str, icon: str = "") -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
-        
+
         # Title with optional icon
         title_text = f"{icon} {title}" if icon else title
         t = QtWidgets.QLabel(title_text)
         t.setObjectName("SubtitleLabel")
         t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        
+
         b = QtWidgets.QTextBrowser()
         b.setOpenExternalLinks(False)
         b.setHtml(f"""
@@ -93,7 +93,7 @@ class OnboardingDialog(QtWidgets.QDialog):
                 padding: 12px;
             }
         """)
-        
+
         lay = QtWidgets.QVBoxLayout(w)
         lay.setSpacing(12)
         lay.addWidget(t)
@@ -117,7 +117,7 @@ class OnboardingDialog(QtWidgets.QDialog):
             "🔄",
         )
         p4 = self._mk_page(
-            tr("Onboarding p4 title"), 
+            tr("Onboarding p4 title"),
             tr("Onboarding p4 body"),
             "⚙️",
         )
@@ -128,12 +128,12 @@ class OnboardingDialog(QtWidgets.QDialog):
     def _sync_buttons(self) -> None:
         i = self.stack.currentIndex()
         total = self.stack.count()
-        
+
         self.btn_back.setEnabled(i > 0)
-        last = (i == total - 1)
+        last = i == total - 1
         self.btn_next.setVisible(not last)
         self.btn_finish.setVisible(last)
-        
+
         # Update progress indicator
         self.progress_label.setText(f"{i + 1} / {total}")
 

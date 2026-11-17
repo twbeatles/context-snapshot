@@ -21,6 +21,7 @@ def default_tags_for_language(lang_code: Optional[str] = None) -> list[str]:
             lang = "en"
     return list(DEFAULT_TAGS_KO if lang.startswith("ko") else DEFAULT_TAGS_EN)
 
+
 DEFAULT_PROCESS_KEYWORDS = [
     "code",
     "pycharm",

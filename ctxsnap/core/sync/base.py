@@ -26,11 +26,9 @@ class SyncConflict:
 class SyncProvider(Protocol):
     name: str
 
-    def pull(self) -> SyncPayload:
-        ...
+    def pull(self) -> SyncPayload: ...
 
-    def push(self, payload: SyncPayload) -> str:
-        ...
+    def push(self, payload: SyncPayload) -> str: ...
 
 
 class SyncProviderError(RuntimeError):

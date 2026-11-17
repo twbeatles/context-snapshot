@@ -10,7 +10,9 @@ from ctxsnap.utils import git_state_details, git_state_key, git_title_suggestion
 
 
 def _run(cmd: list[str], cwd: Path) -> None:
-    subprocess.check_call(cmd, cwd=str(cwd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(
+        cmd, cwd=str(cwd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
 
 def test_git_helpers_support_repository_subdirectories(tmp_path: Path) -> None:

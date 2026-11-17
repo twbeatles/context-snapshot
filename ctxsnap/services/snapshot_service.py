@@ -83,10 +83,14 @@ class SnapshotService:
                 merged[sid] = deleted_at
         return [
             {"id": sid, "deleted_at": deleted_at}
-            for sid, deleted_at in sorted(merged.items(), key=lambda item: (item[1], item[0]), reverse=True)
+            for sid, deleted_at in sorted(
+                merged.items(), key=lambda item: (item[1], item[0]), reverse=True
+            )
         ]
 
-    def prune_tombstones(self, tombstones: Any, *, now: str | None = None) -> list[Dict[str, str]]:
+    def prune_tombstones(
+        self, tombstones: Any, *, now: str | None = None
+    ) -> list[Dict[str, str]]:
         normalized = self.normalize_tombstones(tombstones)
         now_dt = self._parse_datetime(now or now_iso())
         if now_dt is None:
@@ -99,15 +103,24 @@ class SnapshotService:
                 kept.append(item)
         return kept
 
-    def upsert_tombstone(self, index: Dict[str, Any], sid: str, *, deleted_at: str | None = None) -> Dict[str, Any]:
+    def upsert_tombstone(
+        self, index: Dict[str, Any], sid: str, *, deleted_at: str | None = None
+    ) -> Dict[str, Any]:
         out = self.migrate_index(index)
         stamp = str(deleted_at or now_iso())
-        merged = {item["id"]: item["deleted_at"] for item in out.get("tombstones", []) if isinstance(item, dict) and item.get("id")}
+        merged = {
+            item["id"]: item["deleted_at"]
+            for item in out.get("tombstones", [])
+            if isinstance(item, dict) and item.get("id")
+        }
         previous = merged.get(sid, "")
         if stamp > previous:
             merged[sid] = stamp
         out["tombstones"] = self.normalize_tombstones(
-            [{"id": tombstone_id, "deleted_at": value} for tombstone_id, value in merged.items()]
+            [
+                {"id": tombstone_id, "deleted_at": value}
+                for tombstone_id, value in merged.items()
+            ]
         )
         return out
 
@@ -119,7 +132,11 @@ class SnapshotService:
     def latest_snapshot_item(items: Any) -> Dict[str, Any] | None:
         if not isinstance(items, list):
             return None
-        candidates = [item for item in items if isinstance(item, dict) and str(item.get("id") or "").strip()]
+        candidates = [
+            item
+            for item in items
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        ]
         if not candidates:
             return None
         return max(

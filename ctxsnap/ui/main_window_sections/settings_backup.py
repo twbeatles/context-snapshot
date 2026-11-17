@@ -33,10 +33,19 @@ class MainWindowSettingsBackupSection:
     def apply_settings(self, vals: Dict[str, Any], *, save: bool = True) -> bool:
         """Apply settings immediately (UI + hotkey)."""
         vals = migrate_settings(vals)
-        vals["restore_profiles"] = self.restore_service.normalize_profiles(vals.get("restore_profiles", []))
-        vals.setdefault("default_root", self.settings.get("default_root", str(Path.home())))
-        vals["auto_backup_last"] = str(vals.get("auto_backup_last", self.settings.get("auto_backup_last", "")) or "")
-        vals["onboarding_shown"] = bool(vals.get("onboarding_shown", self.settings.get("onboarding_shown", False)))
+        vals["restore_profiles"] = self.restore_service.normalize_profiles(
+            vals.get("restore_profiles", [])
+        )
+        vals.setdefault(
+            "default_root", self.settings.get("default_root", str(Path.home()))
+        )
+        vals["auto_backup_last"] = str(
+            vals.get("auto_backup_last", self.settings.get("auto_backup_last", ""))
+            or ""
+        )
+        vals["onboarding_shown"] = bool(
+            vals.get("onboarding_shown", self.settings.get("onboarding_shown", False))
+        )
         self.settings = vals
         if save:
             if not save_json(self.settings_path, self.settings):
@@ -69,7 +78,10 @@ class MainWindowSettingsBackupSection:
     def _auto_backup_current(self) -> Tuple[Path, bool, str]:
         backups = app_dir() / "backups"
         backups.mkdir(parents=True, exist_ok=True)
-        bkp = backups / f"{APP_NAME}_autobackup_{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        bkp = (
+            backups
+            / f"{APP_NAME}_autobackup_{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        )
         try:
             self.backup_service.export_backup(
                 bkp,
@@ -96,10 +108,16 @@ class MainWindowSettingsBackupSection:
 
         try:
             if data:
-                safety_backup, backup_success, backup_error = self._auto_backup_current()
+                safety_backup, backup_success, backup_error = (
+                    self._auto_backup_current()
+                )
                 if not backup_success:
-                    raise RuntimeError(f"Failed to create safety backup before import: {backup_error}")
-                self.statusBar().showMessage(f"Safety backup created: {safety_backup.name}", 3500)
+                    raise RuntimeError(
+                        f"Failed to create safety backup before import: {backup_error}"
+                    )
+                self.statusBar().showMessage(
+                    f"Safety backup created: {safety_backup.name}", 3500
+                )
 
                 msg = QtWidgets.QMessageBox(self._parent_widget(self))
                 msg.setWindowTitle(tr("Import snapshots"))
@@ -131,10 +149,16 @@ class MainWindowSettingsBackupSection:
                 clicked = msg.clickedButton()
                 if clicked == btn_cancel:
                     return False
-                strategy = "merge" if clicked == btn_merge else ("overwrite" if clicked == btn_overwrite else "replace")
+                strategy = (
+                    "merge"
+                    if clicked == btn_merge
+                    else ("overwrite" if clicked == btn_overwrite else "replace")
+                )
 
                 imported_snaps = data.get("snapshots") or []
-                imported_index = data.get("index") if isinstance(data.get("index"), dict) else None
+                imported_index = (
+                    data.get("index") if isinstance(data.get("index"), dict) else None
+                )
                 if not isinstance(imported_snaps, list):
                     raise ValueError("Invalid backup: snapshots field must be a list.")
 
@@ -145,9 +169,15 @@ class MainWindowSettingsBackupSection:
                 if strategy == "replace":
                     for f in self.snaps_dir.glob("*.json"):
                         f.unlink(missing_ok=True)
-                    self.index = self.snapshot_service.migrate_index({"snapshots": [], "tombstones": []})
+                    self.index = self.snapshot_service.migrate_index(
+                        {"snapshots": [], "tombstones": []}
+                    )
 
-                existing_ids = {str(it.get("id")) for it in self.index.get("snapshots", []) if it.get("id")}
+                existing_ids = {
+                    str(it.get("id"))
+                    for it in self.index.get("snapshots", [])
+                    if it.get("id")
+                }
 
                 for raw_snap in imported_snaps:
                     if not isinstance(raw_snap, dict):
@@ -155,15 +185,21 @@ class MainWindowSettingsBackupSection:
                     snap = migrate_snapshot(dict(raw_snap))
                     sid = str(snap.get("id") or "").strip()
                     if not is_valid_snapshot_id(sid):
-                        LOGGER.warning("Skipping imported snapshot with invalid id: %s", sid)
+                        LOGGER.warning(
+                            "Skipping imported snapshot with invalid id: %s", sid
+                        )
                         continue
                     if strategy == "merge" and sid in existing_ids:
                         continue
 
                     snap_path = safe_snapshot_path(self.snaps_dir, sid)
-                    self._save_snapshot_or_raise(snap_path, snap, f"imported snapshot {sid}")
+                    self._save_snapshot_or_raise(
+                        snap_path, snap, f"imported snapshot {sid}"
+                    )
                     snap_mtime = snapshot_mtime(snap_path)
-                    entry = self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime)
+                    entry = self._index_entry_from_snapshot_data(
+                        snap, snap_mtime=snap_mtime
+                    )
                     if sid not in existing_ids:
                         self.index.setdefault("snapshots", []).append(entry)
                         existing_ids.add(sid)
@@ -175,16 +211,23 @@ class MainWindowSettingsBackupSection:
 
                 imported_tombstones = []
                 if imported_index:
-                    imported_tombstones = self.snapshot_service.normalize_tombstones(imported_index.get("tombstones", []))
+                    imported_tombstones = self.snapshot_service.normalize_tombstones(
+                        imported_index.get("tombstones", [])
+                    )
 
                 if imported_index and strategy in ("overwrite", "replace"):
-                    migrated_index = self.snapshot_service.migrate_index({"snapshots": [], "tombstones": imported_tombstones})
+                    migrated_index = self.snapshot_service.migrate_index(
+                        {"snapshots": [], "tombstones": imported_tombstones}
+                    )
                     for raw_item in imported_index.get("snapshots", []):
                         if not isinstance(raw_item, dict):
                             continue
                         item = dict(raw_item)
                         if not is_valid_snapshot_id(str(item.get("id") or "")):
-                            LOGGER.warning("Skipping imported index item with invalid id: %s", item.get("id"))
+                            LOGGER.warning(
+                                "Skipping imported index item with invalid id: %s",
+                                item.get("id"),
+                            )
                             continue
                         item.setdefault("tags", [])
                         item.setdefault("pinned", False)
@@ -202,14 +245,21 @@ class MainWindowSettingsBackupSection:
                 elif imported_tombstones:
                     merged_tombstones = {
                         item["id"]: item["deleted_at"]
-                        for item in self.snapshot_service.normalize_tombstones(self.index.get("tombstones", []))
+                        for item in self.snapshot_service.normalize_tombstones(
+                            self.index.get("tombstones", [])
+                        )
                     }
                     for item in imported_tombstones:
                         previous = merged_tombstones.get(item["id"], "")
                         if item["deleted_at"] > previous:
                             merged_tombstones[item["id"]] = item["deleted_at"]
-                    self.index["tombstones"] = self.snapshot_service.normalize_tombstones(
-                        [{"id": sid, "deleted_at": deleted_at} for sid, deleted_at in merged_tombstones.items()]
+                    self.index["tombstones"] = (
+                        self.snapshot_service.normalize_tombstones(
+                            [
+                                {"id": sid, "deleted_at": deleted_at}
+                                for sid, deleted_at in merged_tombstones.items()
+                            ]
+                        )
                     )
 
                 seen = set()
@@ -223,7 +273,9 @@ class MainWindowSettingsBackupSection:
                 self.index["snapshots"] = dedup
                 tombstone_map = {
                     item["id"]: item["deleted_at"]
-                    for item in self.snapshot_service.normalize_tombstones(self.index.get("tombstones", []))
+                    for item in self.snapshot_service.normalize_tombstones(
+                        self.index.get("tombstones", [])
+                    )
                 }
                 kept_snapshots = []
                 for item in self.index.get("snapshots", []):
@@ -236,30 +288,49 @@ class MainWindowSettingsBackupSection:
                     kept_snapshots.append(item)
                 self.index["snapshots"] = kept_snapshots
                 self.index = self.snapshot_service.touch_index(self.index)
-                self._save_json_or_raise(self.index_path, self.index, "index after import")
+                self._save_json_or_raise(
+                    self.index_path, self.index, "index after import"
+                )
                 self._reset_pagination_and_refresh()
 
             imported_settings = migrate_settings(payload.get("settings", {}))
             imported_root = str(imported_settings.get("default_root", "") or "")
-            current_root = str(prev_settings.get("default_root", str(Path.home())) or str(Path.home()))
+            current_root = str(
+                prev_settings.get("default_root", str(Path.home())) or str(Path.home())
+            )
             if imported_root and imported_root != current_root:
                 msg = QtWidgets.QMessageBox(self._parent_widget(self))
                 msg.setWindowTitle(tr("Default Root"))
                 msg.setText(tr("Import default root choice"))
-                msg.setInformativeText(f"{tr('Imported')}: {imported_root}\n{tr('Current')}: {current_root}")
-                _btn_imported = msg.addButton(tr("Use imported default root"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-                btn_keep = msg.addButton(tr("Keep current default root"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+                msg.setInformativeText(
+                    f"{tr('Imported')}: {imported_root}\n{tr('Current')}: {current_root}"
+                )
+                _btn_imported = msg.addButton(
+                    tr("Use imported default root"),
+                    QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+                )
+                btn_keep = msg.addButton(
+                    tr("Keep current default root"),
+                    QtWidgets.QMessageBox.ButtonRole.RejectRole,
+                )
                 msg.exec()
                 if msg.clickedButton() == btn_keep:
                     imported_settings["default_root"] = current_root
-            imported_settings["auto_backup_last"] = prev_settings.get("auto_backup_last", "")
-            imported_settings["onboarding_shown"] = prev_settings.get("onboarding_shown", False)
+            imported_settings["auto_backup_last"] = prev_settings.get(
+                "auto_backup_last", ""
+            )
+            imported_settings["onboarding_shown"] = prev_settings.get(
+                "onboarding_shown", False
+            )
             if not self.apply_settings(imported_settings, save=True):
                 raise RuntimeError("Failed to apply imported settings.")
             return True
 
         except Exception as exc:
-            log_exc("apply imported backup", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            log_exc(
+                "apply imported backup",
+                exc if isinstance(exc, Exception) else Exception(str(exc)),
+            )
 
             try:
                 if data and captured_snapshot_files:
@@ -300,7 +371,8 @@ class MainWindowSettingsBackupSection:
             self._parent_widget(self),
             tr("Security Settings"),
             tr("Encrypt existing snapshots confirm"),
-            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
         )
         if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
             return
@@ -311,7 +383,9 @@ class MainWindowSettingsBackupSection:
         try:
             safety_backup, backup_success, backup_error = self._auto_backup_current()
             if not backup_success:
-                raise RuntimeError(f"Failed to create safety backup before encryption: {backup_error}")
+                raise RuntimeError(
+                    f"Failed to create safety backup before encryption: {backup_error}"
+                )
             for f in self.snaps_dir.glob("*.json"):
                 prev_snapshot_files[f.name] = f.read_text(encoding="utf-8")
             captured_snapshot_files = True
@@ -328,24 +402,39 @@ class MainWindowSettingsBackupSection:
                     continue
                 snap = self.snapshot_service.touch_snapshot(snap)
                 path = safe_snapshot_path(self.snaps_dir, sid)
-                persisted = self._persist_snapshot_or_raise(path, snap, f"security migration {sid}")
-                item.update(self._index_entry_from_snapshot_data(persisted, snap_mtime=snapshot_mtime(path)))
+                persisted = self._persist_snapshot_or_raise(
+                    path, snap, f"security migration {sid}"
+                )
+                item.update(
+                    self._index_entry_from_snapshot_data(
+                        persisted, snap_mtime=snapshot_mtime(path)
+                    )
+                )
                 migrated_count += 1
             self.index = self.snapshot_service.touch_index(self.index)
-            self._save_json_or_raise(self.index_path, self.index, "index after security migration")
+            self._save_json_or_raise(
+                self.index_path, self.index, "index after security migration"
+            )
             self._reset_pagination_and_refresh()
             self.statusBar().showMessage(
-                tr("Security migration done").format(count=migrated_count, backup=safety_backup.name),
+                tr("Security migration done").format(
+                    count=migrated_count, backup=safety_backup.name
+                ),
                 4500,
             )
         except Exception as exc:
-            log_exc("security migration", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            log_exc(
+                "security migration",
+                exc if isinstance(exc, Exception) else Exception(str(exc)),
+            )
             try:
                 if captured_snapshot_files:
                     for f in self.snaps_dir.glob("*.json"):
                         f.unlink(missing_ok=True)
                     for name, raw in prev_snapshot_files.items():
-                        safe_snapshot_path(self.snaps_dir, Path(name).stem).write_text(raw, encoding="utf-8")
+                        safe_snapshot_path(self.snaps_dir, Path(name).stem).write_text(
+                            raw, encoding="utf-8"
+                        )
             except Exception as rollback_exc:
                 log_exc("rollback security migration", rollback_exc)
             self.index = prev_index

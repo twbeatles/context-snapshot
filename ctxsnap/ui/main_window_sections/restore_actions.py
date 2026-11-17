@@ -50,13 +50,21 @@ class MainWindowRestoreActionsSection:
         msg.setText("This export may include sensitive data.")
         details: List[str] = []
         if has_sensitive:
-            details.append("Sensitive note, TODO, process, or running-app data is included.")
+            details.append(
+                "Sensitive note, TODO, process, or running-app data is included."
+            )
         if has_security_error:
-            details.append("Some encrypted fields could not be decrypted on this machine.")
+            details.append(
+                "Some encrypted fields could not be decrypted on this machine."
+            )
         details.append("Choose a redacted export to remove sensitive content.")
         msg.setInformativeText("\n".join(details))
-        btn_full = msg.addButton("Full export", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        btn_redacted = msg.addButton("Redacted export", QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        btn_full = msg.addButton(
+            "Full export", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_redacted = msg.addButton(
+            "Redacted export", QtWidgets.QMessageBox.ButtonRole.ActionRole
+        )
         msg.addButton(tr("Cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
         msg.exec()
         clicked = msg.clickedButton()
@@ -76,7 +84,10 @@ class MainWindowRestoreActionsSection:
             return True
         if bool(snap.get("processes")) or bool(snap.get("running_apps")):
             return True
-        if str(snap.get("root", "") or "").strip() or str(snap.get("vscode_workspace", "") or "").strip():
+        if (
+            str(snap.get("root", "") or "").strip()
+            or str(snap.get("vscode_workspace", "") or "").strip()
+        ):
             return True
         if bool(snap.get("recent_files")) or bool(snap.get("git_state")):
             return True
@@ -84,7 +95,9 @@ class MainWindowRestoreActionsSection:
         return isinstance(envelope, dict) and bool(envelope)
 
     @staticmethod
-    def _snapshot_export_payload(snap: Dict[str, Any], *, redacted: bool) -> Dict[str, Any]:
+    def _snapshot_export_payload(
+        snap: Dict[str, Any], *, redacted: bool
+    ) -> Dict[str, Any]:
         out = dict(snap)
         out.pop("_security_error", None)
         if not redacted:
@@ -106,15 +119,21 @@ class MainWindowRestoreActionsSection:
         return out
 
     @staticmethod
-    def _weekly_report_lines(snaps: List[Dict[str, Any]], *, redacted: bool) -> List[str]:
+    def _weekly_report_lines(
+        snaps: List[Dict[str, Any]], *, redacted: bool
+    ) -> List[str]:
         lines = ["# Weekly Snapshot Report", f"Generated: {now_iso()}", ""]
         for snap in snaps:
-            lines.append("## (redacted snapshot)" if redacted else f"## {snap.get('title','(no title)')}")
-            lines.append(f"- Created: {snap.get('created_at','')}")
+            lines.append(
+                "## (redacted snapshot)"
+                if redacted
+                else f"## {snap.get('title', '(no title)')}"
+            )
+            lines.append(f"- Created: {snap.get('created_at', '')}")
             if redacted:
                 lines.append("- Root: (redacted)")
             else:
-                lines.append(f"- Root: {snap.get('root','')}")
+                lines.append(f"- Root: {snap.get('root', '')}")
             tags = [] if redacted else snap.get("tags", [])
             if tags:
                 lines.append(f"- Tags: {', '.join(str(tag) for tag in tags)}")
@@ -206,7 +225,9 @@ class MainWindowRestoreActionsSection:
             snap = self.load_snapshot(it.get("id", "")) or {}
             snaps.append(snap)
             has_sensitive = has_sensitive or self._snapshot_has_sensitive_payload(snap)
-            has_security_error = has_security_error or bool(str(snap.get("_security_error", "") or "").strip())
+            has_security_error = has_security_error or bool(
+                str(snap.get("_security_error", "") or "").strip()
+            )
         export_mode = self._prompt_sensitive_export_mode(
             title="Export weekly report",
             has_sensitive=has_sensitive,
@@ -235,7 +256,9 @@ class MainWindowRestoreActionsSection:
                 tr("Need at least two snapshots to compare"),
             )
             return
-        dlg = CompareDialog(self._parent_widget(self), snapshots, loader=self.load_snapshot)
+        dlg = CompareDialog(
+            self._parent_widget(self), snapshots, loader=self.load_snapshot
+        )
         dlg.exec()
 
     def open_restore_history(self) -> None:
@@ -279,7 +302,9 @@ class MainWindowRestoreActionsSection:
         dlg.exec()
 
     def restore_last(self) -> None:
-        item = self.snapshot_service.latest_snapshot_item(self.index.get("snapshots", []))
+        item = self.snapshot_service.latest_snapshot_item(
+            self.index.get("snapshots", [])
+        )
         if not item:
             return
         sid = item.get("id")
@@ -307,11 +332,21 @@ class MainWindowRestoreActionsSection:
         open_folder_default = bool(restore_defaults.get("open_folder", True))
         open_terminal_default = bool(restore_defaults.get("open_terminal", True))
         open_vscode_default = bool(restore_defaults.get("open_vscode", True))
-        open_running_apps_default = bool(restore_defaults.get("open_running_apps", False))
+        open_running_apps_default = bool(
+            restore_defaults.get("open_running_apps", False)
+        )
         show_checklist_default = bool(restore_defaults.get("show_checklist", True))
         profile_default = str(restore_defaults.get("profile_name", "") or "")
-        profile_enabled = bool(self.settings.get("dev_flags", {}).get("restore_profiles_enabled", False))
-        profiles = self.restore_service.normalize_profiles(self.settings.get("restore_profiles", [])) if profile_enabled else []
+        profile_enabled = bool(
+            self.settings.get("dev_flags", {}).get("restore_profiles_enabled", False)
+        )
+        profiles = (
+            self.restore_service.normalize_profiles(
+                self.settings.get("restore_profiles", [])
+            )
+            if profile_enabled
+            else []
+        )
         preview_default = bool(self.settings.get("restore_preview_default", True))
 
         if preview_default:
@@ -330,7 +365,9 @@ class MainWindowRestoreActionsSection:
                 return
             ch = dlg.choices()
             if ch.get("profile_name"):
-                ch = self.restore_service.apply_profile(self.settings, str(ch.get("profile_name")), ch)
+                ch = self.restore_service.apply_profile(
+                    self.settings, str(ch.get("profile_name")), ch
+                )
         else:
             ch = {
                 "open_folder": open_folder_default,
@@ -403,6 +440,8 @@ class MainWindowRestoreActionsSection:
         if show_checklist:
             todos = snap.get("todos", [])
             if any(todos):
-                dlg = ChecklistDialog(self._parent_widget(self), [t for t in todos if t])
+                dlg = ChecklistDialog(
+                    self._parent_widget(self), [t for t in todos if t]
+                )
                 dlg.exec()
         self.statusBar().showMessage("Restore triggered.", 2500)

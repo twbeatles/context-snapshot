@@ -21,11 +21,26 @@ def test_encrypted_backup_roundtrip(tmp_path: Path) -> None:
     snaps_dir = tmp_path / "snapshots"
     snaps_dir.mkdir(parents=True, exist_ok=True)
     (snaps_dir / "s1.json").write_text(
-        json.dumps({"id": "s1", "created_at": "2026-01-01T00:00:00", "root": "C:/repo"}, ensure_ascii=False),
+        json.dumps(
+            {"id": "s1", "created_at": "2026-01-01T00:00:00", "root": "C:/repo"},
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     index_path = tmp_path / "index.json"
-    save_json(index_path, {"snapshots": [{"id": "s1", "title": "x", "created_at": "2026-01-01T00:00:00", "root": "C:/repo"}]})
+    save_json(
+        index_path,
+        {
+            "snapshots": [
+                {
+                    "id": "s1",
+                    "title": "x",
+                    "created_at": "2026-01-01T00:00:00",
+                    "root": "C:/repo",
+                }
+            ]
+        },
+    )
 
     out_path = tmp_path / "backup.json"
     export_backup_to_file(

@@ -96,7 +96,9 @@ class SecurityService:
             kernel32.LocalFree(out_blob.pbData)
 
     def encrypt_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=self._json_default).encode("utf-8")
+        raw = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, default=self._json_default
+        ).encode("utf-8")
         enc = self._protect(raw)
         return {
             "enc": "dpapi",
@@ -122,17 +124,27 @@ class SecurityService:
     def _security_enabled(settings: Dict[str, Any]) -> bool:
         flags = settings.get("dev_flags", {}) if isinstance(settings, dict) else {}
         sec = settings.get("security", {}) if isinstance(settings, dict) else {}
-        return bool(flags.get("security_enabled", False) and sec.get("dpapi_enabled", False))
+        return bool(
+            flags.get("security_enabled", False) and sec.get("dpapi_enabled", False)
+        )
 
     @staticmethod
-    def _field_enabled(settings: Dict[str, Any], key: str, default: bool = True) -> bool:
+    def _field_enabled(
+        settings: Dict[str, Any], key: str, default: bool = True
+    ) -> bool:
         sec = settings.get("security", {}) if isinstance(settings, dict) else {}
         return bool(sec.get(key, default))
 
-    def encrypt_snapshot_sensitive_fields(self, snap: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
+    def encrypt_snapshot_sensitive_fields(
+        self, snap: Dict[str, Any], settings: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Return a new snapshot dict with configured sensitive fields encrypted into `sensitive`."""
         out = deepcopy(snap)
-        existing_envelope = deepcopy(out.get("sensitive")) if isinstance(out.get("sensitive"), dict) else None
+        existing_envelope = (
+            deepcopy(out.get("sensitive"))
+            if isinstance(out.get("sensitive"), dict)
+            else None
+        )
         out.pop("_security_error", None)
         out.pop("sensitive", None)
         if not self._security_enabled(settings):
@@ -144,13 +156,19 @@ class SecurityService:
         if self._field_enabled(settings, "encrypt_note", True) and out.get("note"):
             sensitive["note"] = out.get("note", "")
             out["note"] = ""
-        if self._field_enabled(settings, "encrypt_todos", True) and any(out.get("todos", [])):
+        if self._field_enabled(settings, "encrypt_todos", True) and any(
+            out.get("todos", [])
+        ):
             sensitive["todos"] = out.get("todos", [])
             out["todos"] = ["", "", ""]
-        if self._field_enabled(settings, "encrypt_processes", True) and out.get("processes"):
+        if self._field_enabled(settings, "encrypt_processes", True) and out.get(
+            "processes"
+        ):
             sensitive["processes"] = out.get("processes", [])
             out["processes"] = []
-        if self._field_enabled(settings, "encrypt_running_apps", True) and out.get("running_apps"):
+        if self._field_enabled(settings, "encrypt_running_apps", True) and out.get(
+            "running_apps"
+        ):
             sensitive["running_apps"] = out.get("running_apps", [])
             out["running_apps"] = []
 
@@ -180,7 +198,9 @@ class SecurityService:
                 out["todos"].append("")
         if isinstance(sensitive.get("processes"), list) and not out.get("processes"):
             out["processes"] = sensitive.get("processes", [])
-        if isinstance(sensitive.get("running_apps"), list) and not out.get("running_apps"):
+        if isinstance(sensitive.get("running_apps"), list) and not out.get(
+            "running_apps"
+        ):
             out["running_apps"] = sensitive.get("running_apps", [])
         return out
 
@@ -201,7 +221,9 @@ class SecurityService:
         return self.decrypt_payload(envelope)
 
     @staticmethod
-    def copy_without_sensitive(snap: Dict[str, Any], keep_fields: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+    def copy_without_sensitive(
+        snap: Dict[str, Any], keep_fields: Optional[Iterable[str]] = None
+    ) -> Dict[str, Any]:
         keep = set(keep_fields or [])
         out = deepcopy(snap)
         if "sensitive" in out and "sensitive" not in keep:

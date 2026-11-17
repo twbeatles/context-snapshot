@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 class SnapshotItemDelegate(QtWidgets.QStyledItemDelegate):
     """HTML을 지원하는 QListView 커스텀 카드 델리게이트"""
+
     def paint(
         self,
         painter: QtGui.QPainter,
@@ -32,13 +33,13 @@ class SnapshotItemDelegate(QtWidgets.QStyledItemDelegate):
         )
 
         painter.save()
-        
+
         # HTML 텍스트 문서 생성
         doc = QtGui.QTextDocument()
         doc.setDefaultFont(options_any.font)
         doc.setHtml(str(index.data(QtCore.Qt.ItemDataRole.DisplayRole) or ""))
         doc.setTextWidth(float(options_any.rect.width()))
-        
+
         # 렌더링 위치 설정
         painter.translate(options_any.rect.left(), options_any.rect.top())
         clip = QtCore.QRectF(
@@ -48,7 +49,7 @@ class SnapshotItemDelegate(QtWidgets.QStyledItemDelegate):
             float(options_any.rect.height()),
         )
         doc.drawContents(painter, clip)
-        
+
         painter.restore()
 
     def sizeHint(
@@ -59,13 +60,13 @@ class SnapshotItemDelegate(QtWidgets.QStyledItemDelegate):
         options = QtWidgets.QStyleOptionViewItem(option)
         self.initStyleOption(options, index)
         options_any = cast(Any, options)
-        
+
         doc = QtGui.QTextDocument()
         doc.setDefaultFont(options_any.font)
         doc.setHtml(str(index.data(QtCore.Qt.ItemDataRole.DisplayRole) or ""))
         rect_width = int(options_any.rect.width())
         doc.setTextWidth(float(rect_width if rect_width > 0 else 300))
-        
+
         return QtCore.QSize(int(doc.idealWidth()), int(doc.size().height()))
 
 
@@ -83,7 +84,8 @@ class SnapshotListModel(QtCore.QAbstractListModel):
 
     def rowCount(
         self,
-        parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = QtCore.QModelIndex(),
+        parent: QtCore.QModelIndex
+        | QtCore.QPersistentModelIndex = QtCore.QModelIndex(),
     ) -> int:
         if parent.isValid():
             return 0
@@ -107,7 +109,7 @@ class SnapshotListModel(QtCore.QAbstractListModel):
         row = index.row()
         if row < 0 or row >= len(self._items):
             return None
-        
+
         item = self._items[row]
         sid = str(item.get("id") or "")
         if role == int(QtCore.Qt.ItemDataRole.DisplayRole):
@@ -120,27 +122,27 @@ class SnapshotListModel(QtCore.QAbstractListModel):
             tags = item.get("tags", []) or []
             pin = "📌&nbsp;" if bool(item.get("pinned", False)) else ""
             archived = "🗄️&nbsp;" if bool(item.get("archived", False)) else ""
-            
+
             # 태그 배지 HTML 디자인
             tag_html = ""
             for tag in tags:
                 tag_html += f'<span style="background-color: #2a2a40; color: #a78bfa; padding: 2px 6px; border-radius: 4px; font-size: 11px;">{tag}</span>&nbsp;'
-            
+
             # 메인 타이틀
             title_html = f'<span style="font-size: 14px; font-weight: bold; color: #f0f0f5;">{title}</span>'
-            
+
             # 하위 정보
             sub_html = f'<span style="font-size: 12px; color: #9090a8;">{root} &bull; {created}</span>'
-            
+
             html = f"{pin}{archived}{tag_html}<br>{title_html}<br>{sub_html}"
-            
+
             self._display_cache[sid] = html
             return html
-            
+
         if role == int(QtCore.Qt.ItemDataRole.UserRole):
             return sid
-        
+
         if role == int(QtCore.Qt.ItemDataRole.UserRole) + 1:
             return item
-            
+
         return None

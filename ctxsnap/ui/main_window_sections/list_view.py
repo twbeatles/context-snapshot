@@ -77,27 +77,49 @@ class MainWindowListViewSection:
             self.settings.get("dev_flags", {}).get("advanced_search_enabled", False)
             and self.settings.get("search", {}).get("enable_field_query", True)
         )
-        parsed_query = self.search_service.parse(query_raw, field_enabled=field_query_enabled)
+        parsed_query = self.search_service.parse(
+            query_raw, field_enabled=field_query_enabled
+        )
         if field_query_enabled and parsed_query.fields:
             LOGGER.info("search_field_query query=%s", query_raw)
-        pinned_only = bool(self.pinned_only.isChecked()) if hasattr(self, "pinned_only") else False
-        show_archived = bool(self.show_archived.isChecked()) if hasattr(self, "show_archived") else False
+        pinned_only = (
+            bool(self.pinned_only.isChecked())
+            if hasattr(self, "pinned_only")
+            else False
+        )
+        show_archived = (
+            bool(self.show_archived.isChecked())
+            if hasattr(self, "show_archived")
+            else False
+        )
 
         items = list(self.index.get("snapshots", []))
         view_items: List[Dict[str, Any]] = []
 
-        sort_mode = self.sort_combo.currentData() if hasattr(self, "sort_combo") else "newest"
-        
+        sort_mode = (
+            self.sort_combo.currentData() if hasattr(self, "sort_combo") else "newest"
+        )
+
         if sort_mode == "pinned":
-            items.sort(key=lambda x: (not bool(x.get("pinned", False)), x.get("created_at", "")), reverse=False)
+            items.sort(
+                key=lambda x: (
+                    not bool(x.get("pinned", False)),
+                    x.get("created_at", ""),
+                ),
+                reverse=False,
+            )
         elif sort_mode == "oldest":
             items.sort(key=lambda x: x.get("created_at", ""))
         elif sort_mode == "title":
-            items.sort(key=lambda x: (x.get("title", "").lower(), x.get("created_at", "")))
-        else: # newest or default
+            items.sort(
+                key=lambda x: (x.get("title", "").lower(), x.get("created_at", ""))
+            )
+        else:  # newest or default
             items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-        days_filter = self.days_filter.currentData() if hasattr(self, "days_filter") else "all"
+        days_filter = (
+            self.days_filter.currentData() if hasattr(self, "days_filter") else "all"
+        )
         now = datetime.now()
         day_cutoff = None
         # Logic based on "1", "3", "7", "30", "all"
@@ -148,7 +170,7 @@ class MainWindowListViewSection:
                 f"{tr('Storage:')} {showing} / {len(view_items)} (Total {total_all})"
             )
         self._update_pagination_controls()
-        
+
         # Toggle Empty State
         if hasattr(self, "list_stack") and hasattr(self, "empty_state"):
             if not view_items:
@@ -164,4 +186,3 @@ class MainWindowListViewSection:
         if not sid:
             return None
         return sid
-

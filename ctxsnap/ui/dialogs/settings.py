@@ -27,12 +27,8 @@ def _make_scrollable(widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
     scroll.setWidget(widget)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(
-        QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
-    )
-    scroll.setVerticalScrollBarPolicy(
-        QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded
-    )
+    scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     return scroll
 
 
@@ -44,12 +40,19 @@ class SettingsDialog(QtWidgets.QDialog):
     - Restore preview default toggle
     - Tags management
     """
-    
+
     settingsImported = QtCore.Signal(dict)
     syncRequested = QtCore.Signal(dict)
     securityMigrationRequested = QtCore.Signal(dict)
 
-    def __init__(self, parent: QtWidgets.QWidget, settings: Dict[str, Any], *, index_path: Path, snaps_dir: Path):
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget,
+        settings: Dict[str, Any],
+        *,
+        index_path: Path,
+        snaps_dir: Path,
+    ):
         super().__init__(parent)
         self.setWindowTitle(tr("Settings"))
         self.setModal(True)
@@ -116,16 +119,26 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_folder = QtWidgets.QCheckBox("📁 " + tr("Open folder on restore"))
         self.rs_terminal = QtWidgets.QCheckBox("💻 " + tr("Open terminal on restore"))
         self.rs_vscode = QtWidgets.QCheckBox("🔷 " + tr("Open VSCode on restore"))
-        self.rs_running_apps = QtWidgets.QCheckBox("📱 " + tr("Restore apps on restore"))
-        self.rs_checklist = QtWidgets.QCheckBox("✅ " + tr("Show post-restore checklist"))
+        self.rs_running_apps = QtWidgets.QCheckBox(
+            "📱 " + tr("Restore apps on restore")
+        )
+        self.rs_checklist = QtWidgets.QCheckBox(
+            "✅ " + tr("Show post-restore checklist")
+        )
         self.rs_folder.setChecked(bool(restore.get("open_folder", True)))
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
-        self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
+        self.rs_checklist.setChecked(
+            bool(restore.get("show_post_restore_checklist", True))
+        )
 
-        self.preview_default = QtWidgets.QCheckBox("👁 " + tr("Show restore preview by default"))
-        self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
+        self.preview_default = QtWidgets.QCheckBox(
+            "👁 " + tr("Show restore preview by default")
+        )
+        self.preview_default.setChecked(
+            bool(settings.get("restore_preview_default", True))
+        )
 
         restore_page = QtWidgets.QWidget()
         restore_box = QtWidgets.QGroupBox("🔄 " + tr("Restore Defaults"))
@@ -211,7 +224,9 @@ class SettingsDialog(QtWidgets.QDialog):
         lang_layout.addWidget(self.lang_combo)
         lang_layout.addStretch(1)
 
-        self.default_root_edit = QtWidgets.QLineEdit(str(settings.get("default_root", str(Path.home()))))
+        self.default_root_edit = QtWidgets.QLineEdit(
+            str(settings.get("default_root", str(Path.home())))
+        )
         self.default_root_edit.setPlaceholderText(str(Path.home()))
         self.default_root_btn = QtWidgets.QPushButton(tr("Browse"))
         self.default_root_btn.clicked.connect(self.pick_default_root)
@@ -231,17 +246,23 @@ class SettingsDialog(QtWidgets.QDialog):
         self.recent_spin.setSuffix(tr("suffix_files"))
         self.scan_limit_spin = NoScrollSpinBox()
         self.scan_limit_spin.setRange(100, 200000)
-        self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
+        self.scan_limit_spin.setValue(
+            int(settings.get("recent_files_scan_limit", 20000))
+        )
         self.scan_limit_spin.setSuffix(tr("suffix_files"))
         self.scan_seconds_spin = NoScrollDoubleSpinBox()
         self.scan_seconds_spin.setRange(0.1, 10.0)
         self.scan_seconds_spin.setSingleStep(0.5)
-        self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
+        self.scan_seconds_spin.setValue(
+            float(settings.get("recent_files_scan_seconds", 2.0))
+        )
         self.scan_seconds_spin.setSuffix(tr("suffix_sec"))
         self.background_recent = QtWidgets.QCheckBox("🔄 " + tr("Recent Files Scan"))
         self.background_recent.setToolTip(tr("Recent Files Scan"))
-        self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
-        
+        self.background_recent.setChecked(
+            bool(settings.get("recent_files_background", False))
+        )
+
         scan_box = QtWidgets.QGroupBox("📁 " + tr("Recent Files Scan"))
         scan_layout = QtWidgets.QFormLayout(scan_box)
         scan_layout.setSpacing(8)
@@ -255,41 +276,58 @@ class SettingsDialog(QtWidgets.QDialog):
         self.page_size_spin.setRange(20, 2000)
         self.page_size_spin.setValue(int(settings.get("list_page_size", 200)))
         self.page_size_spin.setSuffix(tr("suffix_per_page"))
-        
+
         # Auto snapshot
         self.auto_snapshot_minutes = NoScrollSpinBox()
         self.auto_snapshot_minutes.setRange(0, 1440)
         self.auto_snapshot_minutes.setSuffix(tr("suffix_min"))
-        self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
-        self.auto_snapshot_on_git = QtWidgets.QCheckBox("📦 " + tr("Trigger on Git commit"))
-        self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
-        
+        self.auto_snapshot_minutes.setValue(
+            int(settings.get("auto_snapshot_minutes", 0))
+        )
+        self.auto_snapshot_on_git = QtWidgets.QCheckBox(
+            "📦 " + tr("Trigger on Git commit")
+        )
+        self.auto_snapshot_on_git.setChecked(
+            bool(settings.get("auto_snapshot_on_git_change", False))
+        )
+
         auto_box = QtWidgets.QGroupBox("⏰ " + tr("Automation"))
         auto_layout = QtWidgets.QFormLayout(auto_box)
         auto_layout.setSpacing(8)
-        auto_layout.addRow("📋 " + tr("Snapshot list page size") + ":", self.page_size_spin)
-        auto_layout.addRow("⏱ " + tr("Interval (minutes, 0=disabled)") + ":", self.auto_snapshot_minutes)
+        auto_layout.addRow(
+            "📋 " + tr("Snapshot list page size") + ":", self.page_size_spin
+        )
+        auto_layout.addRow(
+            "⏱ " + tr("Interval (minutes, 0=disabled)") + ":",
+            self.auto_snapshot_minutes,
+        )
         auto_layout.addRow("", self.auto_snapshot_on_git)
-        
+
         # Capture settings
         capture = settings.get("capture", {})
-        self.capture_recent = QtWidgets.QCheckBox("📁 " + tr("Capture recent files")) 
-        self.capture_processes = QtWidgets.QCheckBox("⚙️ " + tr("Capture running processes"))
-        self.capture_running_apps = QtWidgets.QCheckBox("📱 " + tr("Running apps to restore"))
+        self.capture_recent = QtWidgets.QCheckBox("📁 " + tr("Capture recent files"))
+        self.capture_processes = QtWidgets.QCheckBox(
+            "⚙️ " + tr("Capture running processes")
+        )
+        self.capture_running_apps = QtWidgets.QCheckBox(
+            "📱 " + tr("Running apps to restore")
+        )
         self.capture_note = QtWidgets.QCheckBox("📝 " + tr("Capture note"))
         self.capture_todos = QtWidgets.QCheckBox("✅ " + tr("Capture TODOs"))
         self.capture_enforce_todos = QtWidgets.QCheckBox("⚠️ " + tr("Enforce 3 TODOs"))
-        
+
         self.capture_recent.setToolTip(tr("Recent Files Hint"))
         self.capture_processes.setToolTip(tr("Privacy Hint"))
         self.capture_running_apps.setToolTip(tr("Privacy Hint"))
-        
+
         self.capture_recent.setChecked(bool(capture.get("recent_files", True)))
         self.capture_processes.setChecked(bool(capture.get("processes", True)))
         self.capture_running_apps.setChecked(bool(capture.get("running_apps", True)))
         self.capture_note.setChecked(bool(settings.get("capture_note", True)))
         self.capture_todos.setChecked(bool(settings.get("capture_todos", True)))
-        self.capture_enforce_todos.setChecked(bool(settings.get("capture_enforce_todos", True)))
+        self.capture_enforce_todos.setChecked(
+            bool(settings.get("capture_enforce_todos", True))
+        )
 
         capture_box = QtWidgets.QGroupBox("📸 " + tr("Capture Options"))
         capture_layout = QtWidgets.QVBoxLayout(capture_box)
@@ -306,30 +344,50 @@ class SettingsDialog(QtWidgets.QDialog):
         self.archive_after_days.setRange(0, 3650)
         self.archive_after_days.setValue(int(settings.get("archive_after_days", 0)))
         self.archive_after_days.setSuffix(tr("suffix_days"))
-        self.archive_skip_pinned = QtWidgets.QCheckBox("📌 " + tr("Skip pinned snapshots when auto-archiving"))
-        self.archive_skip_pinned.setChecked(bool(settings.get("archive_skip_pinned", True)))
+        self.archive_skip_pinned = QtWidgets.QCheckBox(
+            "📌 " + tr("Skip pinned snapshots when auto-archiving")
+        )
+        self.archive_skip_pinned.setChecked(
+            bool(settings.get("archive_skip_pinned", True))
+        )
         self.auto_backup_hours = NoScrollSpinBox()
         self.auto_backup_hours.setRange(0, 168)
         self.auto_backup_hours.setValue(int(settings.get("auto_backup_hours", 0)))
         self.auto_backup_hours.setSuffix(tr("suffix_hours"))
-        
+
         archive_box = QtWidgets.QGroupBox("🗄️ " + tr("Archive & Backup"))
         archive_layout = QtWidgets.QFormLayout(archive_box)
         archive_layout.setSpacing(8)
-        archive_layout.addRow("📦 " + tr("Auto-archive after") + ":", self.archive_after_days)
+        archive_layout.addRow(
+            "📦 " + tr("Auto-archive after") + ":", self.archive_after_days
+        )
         archive_layout.addRow("", self.archive_skip_pinned)
-        archive_layout.addRow("💾 " + tr("Auto backup interval") + ":", self.auto_backup_hours)
+        archive_layout.addRow(
+            "💾 " + tr("Auto backup interval") + ":", self.auto_backup_hours
+        )
 
         # Developer flags / Sync / Security / Search
         dev_flags = settings.get("dev_flags", {})
         self.flag_sync_enabled = QtWidgets.QCheckBox("🛰️ " + tr("Enable Sync Feature"))
-        self.flag_security_enabled = QtWidgets.QCheckBox("🔐 " + tr("Enable Security Feature"))
-        self.flag_adv_search_enabled = QtWidgets.QCheckBox("🔎 " + tr("Enable Advanced Search"))
-        self.flag_restore_profiles_enabled = QtWidgets.QCheckBox("🧩 " + tr("Enable Restore Profiles"))
+        self.flag_security_enabled = QtWidgets.QCheckBox(
+            "🔐 " + tr("Enable Security Feature")
+        )
+        self.flag_adv_search_enabled = QtWidgets.QCheckBox(
+            "🔎 " + tr("Enable Advanced Search")
+        )
+        self.flag_restore_profiles_enabled = QtWidgets.QCheckBox(
+            "🧩 " + tr("Enable Restore Profiles")
+        )
         self.flag_sync_enabled.setChecked(bool(dev_flags.get("sync_enabled", False)))
-        self.flag_security_enabled.setChecked(bool(dev_flags.get("security_enabled", False)))
-        self.flag_adv_search_enabled.setChecked(bool(dev_flags.get("advanced_search_enabled", False)))
-        self.flag_restore_profiles_enabled.setChecked(bool(dev_flags.get("restore_profiles_enabled", False)))
+        self.flag_security_enabled.setChecked(
+            bool(dev_flags.get("security_enabled", False))
+        )
+        self.flag_adv_search_enabled.setChecked(
+            bool(dev_flags.get("advanced_search_enabled", False))
+        )
+        self.flag_restore_profiles_enabled.setChecked(
+            bool(dev_flags.get("restore_profiles_enabled", False))
+        )
 
         dev_box = QtWidgets.QGroupBox("🛠️ " + tr("Developer Features"))
         dev_layout = QtWidgets.QVBoxLayout(dev_box)
@@ -346,7 +404,9 @@ class SettingsDialog(QtWidgets.QDialog):
         idx_sync = self.sync_provider.findData(str(sync_cfg.get("provider", "local")))
         if idx_sync >= 0:
             self.sync_provider.setCurrentIndex(idx_sync)
-        self.sync_local_root = QtWidgets.QLineEdit(str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync"))))
+        self.sync_local_root = QtWidgets.QLineEdit(
+            str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync")))
+        )
         self.sync_interval_minutes = NoScrollSpinBox()
         self.sync_interval_minutes.setRange(0, 1440)
         self.sync_interval_minutes.setSuffix(tr("suffix_min"))
@@ -372,7 +432,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.sec_todos.setChecked(bool(security_cfg.get("encrypt_todos", True)))
         self.sec_processes.setChecked(bool(security_cfg.get("encrypt_processes", True)))
         self.sec_apps.setChecked(bool(security_cfg.get("encrypt_running_apps", True)))
-        self.btn_security_migrate = QtWidgets.QPushButton("🔐 " + tr("Encrypt existing snapshots"))
+        self.btn_security_migrate = QtWidgets.QPushButton(
+            "🔐 " + tr("Encrypt existing snapshots")
+        )
         self.btn_security_migrate.clicked.connect(self.request_security_migration)
         sec_box = QtWidgets.QGroupBox("🔐 " + tr("Security Settings"))
         sec_layout = QtWidgets.QVBoxLayout(sec_box)
@@ -385,10 +447,18 @@ class SettingsDialog(QtWidgets.QDialog):
         sec_layout.addWidget(self.btn_security_migrate)
 
         search_cfg = settings.get("search", {})
-        self.search_enable_field_query = QtWidgets.QCheckBox("🔎 " + tr("Enable Field Query"))
-        self.search_enable_field_query.setChecked(bool(search_cfg.get("enable_field_query", True)))
-        self.search_saved_queries = QtWidgets.QLineEdit(", ".join(search_cfg.get("saved_queries", [])))
-        self.search_saved_queries.setPlaceholderText(tr("Saved queries (comma-separated)"))
+        self.search_enable_field_query = QtWidgets.QCheckBox(
+            "🔎 " + tr("Enable Field Query")
+        )
+        self.search_enable_field_query.setChecked(
+            bool(search_cfg.get("enable_field_query", True))
+        )
+        self.search_saved_queries = QtWidgets.QLineEdit(
+            ", ".join(search_cfg.get("saved_queries", []))
+        )
+        self.search_saved_queries.setPlaceholderText(
+            tr("Saved queries (comma-separated)")
+        )
         search_box = QtWidgets.QGroupBox("🔎 " + tr("Search Settings"))
         search_layout = QtWidgets.QFormLayout(search_box)
         search_layout.setSpacing(8)
@@ -400,14 +470,22 @@ class SettingsDialog(QtWidgets.QDialog):
         self.exclude_dirs.setPlaceholderText(tr("Exclude dirs (comma-separated)"))
         self.exclude_dirs.setText(", ".join(settings.get("recent_files_exclude", [])))
         self.exclude_dirs.setToolTip(tr("Exclude dirs (comma-separated)"))
-        
+
         self.include_patterns = QtWidgets.QLineEdit()
-        self.include_patterns.setPlaceholderText(tr("Include patterns for recent file scan"))
-        self.include_patterns.setText(", ".join(settings.get("recent_files_include", [])))
+        self.include_patterns.setPlaceholderText(
+            tr("Include patterns for recent file scan")
+        )
+        self.include_patterns.setText(
+            ", ".join(settings.get("recent_files_include", []))
+        )
         self.exclude_patterns = QtWidgets.QLineEdit()
-        self.exclude_patterns.setPlaceholderText(tr("Exclude patterns for recent file scan"))
-        self.exclude_patterns.setText(", ".join(settings.get("recent_files_exclude_patterns", [])))
-        
+        self.exclude_patterns.setPlaceholderText(
+            tr("Exclude patterns for recent file scan")
+        )
+        self.exclude_patterns.setText(
+            ", ".join(settings.get("recent_files_exclude_patterns", []))
+        )
+
         self.process_keywords = QtWidgets.QLineEdit()
         self.process_keywords.setPlaceholderText(tr("Process Keywords"))
         self.process_keywords.setText(", ".join(settings.get("process_keywords", [])))
@@ -415,15 +493,23 @@ class SettingsDialog(QtWidgets.QDialog):
         filter_box = QtWidgets.QGroupBox("🔍 " + tr("Filters"))
         filter_layout = QtWidgets.QFormLayout(filter_box)
         filter_layout.setSpacing(8)
-        filter_layout.addRow("🚫 " + tr("Exclude dirs (comma-separated)") + ":", self.exclude_dirs)
-        filter_layout.addRow("✅ " + tr("Include patterns for recent file scan") + ":", self.include_patterns)
-        filter_layout.addRow("❌ " + tr("Exclude patterns for recent file scan") + ":", self.exclude_patterns)
+        filter_layout.addRow(
+            "🚫 " + tr("Exclude dirs (comma-separated)") + ":", self.exclude_dirs
+        )
+        filter_layout.addRow(
+            "✅ " + tr("Include patterns for recent file scan") + ":",
+            self.include_patterns,
+        )
+        filter_layout.addRow(
+            "❌ " + tr("Exclude patterns for recent file scan") + ":",
+            self.exclude_patterns,
+        )
         filter_layout.addRow("⚙️ " + tr("Process Keywords") + ":", self.process_keywords)
-        
+
         privacy_hint = QtWidgets.QLabel("🔒 " + tr("Privacy Hint"))
         privacy_hint.setObjectName("HintLabel")
         privacy_hint.setWordWrap(True)
-        
+
         # General layout with all boxes
         general_layout = QtWidgets.QVBoxLayout(general_content)
         general_layout.setSpacing(12)
@@ -441,7 +527,7 @@ class SettingsDialog(QtWidgets.QDialog):
         general_layout.addWidget(filter_box)
         general_layout.addWidget(privacy_hint)
         general_layout.addStretch(1)
-        
+
         # Wrap in scroll area
         general_page = _make_scrollable(general_content)
 
@@ -451,14 +537,14 @@ class SettingsDialog(QtWidgets.QDialog):
         self.tags_list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
         )
-        for t in (settings.get("tags") or DEFAULT_TAGS):
+        for t in settings.get("tags") or DEFAULT_TAGS:
             self.tags_list.addItem(t)
         self.tag_input = QtWidgets.QLineEdit()
         self.tag_input.setPlaceholderText(tr("Add tag placeholder"))
-        
-        btn_add = QtWidgets.QPushButton("➕ " + tr("Add")) 
+
+        btn_add = QtWidgets.QPushButton("➕ " + tr("Add"))
         btn_add.setProperty("primary", True)
-        btn_remove = QtWidgets.QPushButton("🗑 " + tr("Delete")) 
+        btn_remove = QtWidgets.QPushButton("🗑 " + tr("Delete"))
         btn_remove.setProperty("danger", True)
         btn_add.clicked.connect(self.add_tag)
         btn_remove.clicked.connect(self.remove_tag)
@@ -483,7 +569,7 @@ class SettingsDialog(QtWidgets.QDialog):
         tags_layout.addWidget(tags_box)
         tags_layout.addWidget(tags_hint)
         tags_layout.addStretch(1)
-        
+
         tags_page = _make_scrollable(tags_content)
 
         # === Templates tab ===
@@ -544,12 +630,12 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self._templates_cache = []
         self._load_templates(settings.get("templates", []))
-        
+
         templates_page = _make_scrollable(templates_content)
 
         # === Backup tab ===
         backup_content = QtWidgets.QWidget()
-        b_title = QtWidgets.QLabel("💾 " + tr("Backup / Restore")) 
+        b_title = QtWidgets.QLabel("💾 " + tr("Backup / Restore"))
         b_title.setObjectName("TitleLabel")
         b_hint = QtWidgets.QLabel("💡 " + tr("Backup Hint"))
         b_hint.setObjectName("HintLabel")
@@ -563,7 +649,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.exp_index.setChecked(True)
         self.exp_snaps = QtWidgets.QCheckBox("📸 " + tr("Include snapshots"))
         self.exp_snaps.setChecked(True)
-        self.exp_encrypt_backup = QtWidgets.QCheckBox("🔐 " + tr("Encrypt backup with DPAPI"))
+        self.exp_encrypt_backup = QtWidgets.QCheckBox(
+            "🔐 " + tr("Encrypt backup with DPAPI")
+        )
         self.exp_encrypt_backup.setChecked(False)
 
         exp_box = QtWidgets.QGroupBox("📤 " + tr("Export options group"))
@@ -606,7 +694,7 @@ class SettingsDialog(QtWidgets.QDialog):
         b_layout.addSpacing(10)
         b_layout.addWidget(self.b_msg)
         b_layout.addStretch(1)
-        
+
         backup_page = _make_scrollable(backup_content)
 
         # Add tabs with emojis
@@ -645,7 +733,10 @@ class SettingsDialog(QtWidgets.QDialog):
     def export_settings(self):
         default_name = f"{APP_NAME}_backup_{datetime.now().strftime('%Y%m%d')}.json"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export backup", str(Path.home() / default_name), "JSON files (*.json)"
+            self,
+            "Export backup",
+            str(Path.home() / default_name),
+            "JSON files (*.json)",
         )
         if not path:
             return
@@ -694,7 +785,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.ButtonRole.RejectRole,
             )
             msg.exec()
-            self._import_apply_now = (msg.clickedButton() == btn_apply)
+            self._import_apply_now = msg.clickedButton() == btn_apply
 
             if self._import_apply_now:
                 self.settingsImported.emit(payload)
@@ -719,7 +810,9 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def request_security_migration(self) -> None:
         vals = self.values()
-        if not bool(vals.get("dev_flags", {}).get("security_enabled", False)) or not bool(vals.get("security", {}).get("dpapi_enabled", False)):
+        if not bool(
+            vals.get("dev_flags", {}).get("security_enabled", False)
+        ) or not bool(vals.get("security", {}).get("dpapi_enabled", False)):
             QtWidgets.QMessageBox.information(
                 self,
                 tr("Security Settings"),
@@ -741,11 +834,15 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def pick_default_root(self) -> None:
         start = self.default_root_edit.text().strip() or str(Path.home())
-        path = QtWidgets.QFileDialog.getExistingDirectory(self, tr("Default Root"), start)
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, tr("Default Root"), start
+        )
         if path:
             self.default_root_edit.setText(path)
 
-    def apply_settings_to_controls(self, settings: Dict[str, Any], *, reset_import_state: bool = True) -> None:
+    def apply_settings_to_controls(
+        self, settings: Dict[str, Any], *, reset_import_state: bool = True
+    ) -> None:
         """Apply a settings dict to UI controls (does not save to disk here)."""
         settings = migrate_settings(settings)
         self._settings = settings
@@ -759,9 +856,11 @@ class SettingsDialog(QtWidgets.QDialog):
         if idx >= 0:
             self.lang_combo.setCurrentIndex(idx)
         else:
-            self.lang_combo.setCurrentIndex(0) # Default to auto if unknown
+            self.lang_combo.setCurrentIndex(0)  # Default to auto if unknown
 
-        self.default_root_edit.setText(str(settings.get("default_root", str(Path.home()))))
+        self.default_root_edit.setText(
+            str(settings.get("default_root", str(Path.home())))
+        )
 
         hk = settings.get("hotkey", {})
         self.hk_enabled.setChecked(bool(hk.get("enabled", True)))
@@ -778,40 +877,70 @@ class SettingsDialog(QtWidgets.QDialog):
         self.rs_terminal.setChecked(bool(restore.get("open_terminal", True)))
         self.rs_vscode.setChecked(bool(restore.get("open_vscode", True)))
         self.rs_running_apps.setChecked(bool(restore.get("open_running_apps", False)))
-        self.rs_checklist.setChecked(bool(restore.get("show_post_restore_checklist", True)))
-        self.preview_default.setChecked(bool(settings.get("restore_preview_default", True)))
+        self.rs_checklist.setChecked(
+            bool(restore.get("show_post_restore_checklist", True))
+        )
+        self.preview_default.setChecked(
+            bool(settings.get("restore_preview_default", True))
+        )
 
         self.recent_spin.setValue(int(settings.get("recent_files_limit", 30)))
-        self.scan_limit_spin.setValue(int(settings.get("recent_files_scan_limit", 20000)))
-        self.scan_seconds_spin.setValue(float(settings.get("recent_files_scan_seconds", 2.0)))
-        self.background_recent.setChecked(bool(settings.get("recent_files_background", False)))
+        self.scan_limit_spin.setValue(
+            int(settings.get("recent_files_scan_limit", 20000))
+        )
+        self.scan_seconds_spin.setValue(
+            float(settings.get("recent_files_scan_seconds", 2.0))
+        )
+        self.background_recent.setChecked(
+            bool(settings.get("recent_files_background", False))
+        )
         self.page_size_spin.setValue(int(settings.get("list_page_size", 200)))
-        self.auto_snapshot_minutes.setValue(int(settings.get("auto_snapshot_minutes", 0)))
-        self.auto_snapshot_on_git.setChecked(bool(settings.get("auto_snapshot_on_git_change", False)))
+        self.auto_snapshot_minutes.setValue(
+            int(settings.get("auto_snapshot_minutes", 0))
+        )
+        self.auto_snapshot_on_git.setChecked(
+            bool(settings.get("auto_snapshot_on_git_change", False))
+        )
         capture = settings.get("capture", {})
         self.capture_recent.setChecked(bool(capture.get("recent_files", True)))
         self.capture_processes.setChecked(bool(capture.get("processes", True)))
         self.capture_running_apps.setChecked(bool(capture.get("running_apps", True)))
         self.capture_note.setChecked(bool(settings.get("capture_note", True)))
         self.capture_todos.setChecked(bool(settings.get("capture_todos", True)))
-        self.capture_enforce_todos.setChecked(bool(settings.get("capture_enforce_todos", True)))
+        self.capture_enforce_todos.setChecked(
+            bool(settings.get("capture_enforce_todos", True))
+        )
         self.exclude_dirs.setText(", ".join(settings.get("recent_files_exclude", [])))
-        self.include_patterns.setText(", ".join(settings.get("recent_files_include", [])))
-        self.exclude_patterns.setText(", ".join(settings.get("recent_files_exclude_patterns", [])))
+        self.include_patterns.setText(
+            ", ".join(settings.get("recent_files_include", []))
+        )
+        self.exclude_patterns.setText(
+            ", ".join(settings.get("recent_files_exclude_patterns", []))
+        )
         self.process_keywords.setText(", ".join(settings.get("process_keywords", [])))
         self.archive_after_days.setValue(int(settings.get("archive_after_days", 0)))
-        self.archive_skip_pinned.setChecked(bool(settings.get("archive_skip_pinned", True)))
+        self.archive_skip_pinned.setChecked(
+            bool(settings.get("archive_skip_pinned", True))
+        )
         self.auto_backup_hours.setValue(int(settings.get("auto_backup_hours", 0)))
         dev_flags = settings.get("dev_flags", {})
         self.flag_sync_enabled.setChecked(bool(dev_flags.get("sync_enabled", False)))
-        self.flag_security_enabled.setChecked(bool(dev_flags.get("security_enabled", False)))
-        self.flag_adv_search_enabled.setChecked(bool(dev_flags.get("advanced_search_enabled", False)))
-        self.flag_restore_profiles_enabled.setChecked(bool(dev_flags.get("restore_profiles_enabled", False)))
+        self.flag_security_enabled.setChecked(
+            bool(dev_flags.get("security_enabled", False))
+        )
+        self.flag_adv_search_enabled.setChecked(
+            bool(dev_flags.get("advanced_search_enabled", False))
+        )
+        self.flag_restore_profiles_enabled.setChecked(
+            bool(dev_flags.get("restore_profiles_enabled", False))
+        )
         sync_cfg = settings.get("sync", {})
         idx_sync = self.sync_provider.findData(str(sync_cfg.get("provider", "local")))
         if idx_sync >= 0:
             self.sync_provider.setCurrentIndex(idx_sync)
-        self.sync_local_root.setText(str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync"))))
+        self.sync_local_root.setText(
+            str(sync_cfg.get("local_root", str(Path.home() / "ctxsnap_sync")))
+        )
         self.sync_interval_minutes.setValue(int(sync_cfg.get("auto_interval_min", 0)))
         sec_cfg = settings.get("security", {})
         self.dpapi_enabled.setChecked(bool(sec_cfg.get("dpapi_enabled", False)))
@@ -820,12 +949,16 @@ class SettingsDialog(QtWidgets.QDialog):
         self.sec_processes.setChecked(bool(sec_cfg.get("encrypt_processes", True)))
         self.sec_apps.setChecked(bool(sec_cfg.get("encrypt_running_apps", True)))
         search_cfg = settings.get("search", {})
-        self.search_enable_field_query.setChecked(bool(search_cfg.get("enable_field_query", True)))
-        self.search_saved_queries.setText(", ".join(search_cfg.get("saved_queries", [])))
+        self.search_enable_field_query.setChecked(
+            bool(search_cfg.get("enable_field_query", True))
+        )
+        self.search_saved_queries.setText(
+            ", ".join(search_cfg.get("saved_queries", []))
+        )
         self._load_restore_profiles(settings.get("restore_profiles", []))
 
         self.tags_list.clear()
-        for t in (settings.get("tags") or DEFAULT_TAGS):
+        for t in settings.get("tags") or DEFAULT_TAGS:
             self.tags_list.addItem(t)
         self._load_templates(settings.get("templates", []))
 
@@ -880,7 +1013,9 @@ class SettingsDialog(QtWidgets.QDialog):
                 self.template_todo2.text().strip(),
                 self.template_todo3.text().strip(),
             ],
-            "tags": [t.strip() for t in self.template_tags.text().split(",") if t.strip()],
+            "tags": [
+                t.strip() for t in self.template_tags.text().split(",") if t.strip()
+            ],
         }
         row = self.templates_list.currentRow()
         if row >= 0 and row < len(self._templates_cache):
@@ -899,7 +1034,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.templates_list.takeItem(row)
 
     def _load_restore_profiles(self, profiles: List[Dict[str, Any]]) -> None:
-        self._restore_profiles_cache = [p for p in (profiles or []) if isinstance(p, dict)]
+        self._restore_profiles_cache = [
+            p for p in (profiles or []) if isinstance(p, dict)
+        ]
         self.restore_profiles_list.clear()
         for profile in self._restore_profiles_cache:
             self.restore_profiles_list.addItem(str(profile.get("name", "Default")))
@@ -941,7 +1078,9 @@ class SettingsDialog(QtWidgets.QDialog):
         else:
             self._restore_profiles_cache.append(profile)
             self.restore_profiles_list.addItem(name)
-            self.restore_profiles_list.setCurrentRow(len(self._restore_profiles_cache) - 1)
+            self.restore_profiles_list.setCurrentRow(
+                len(self._restore_profiles_cache) - 1
+            )
         if profile["default"]:
             for i, existing in enumerate(self._restore_profiles_cache):
                 if i != self.restore_profiles_list.currentRow():
@@ -966,11 +1105,17 @@ class SettingsDialog(QtWidgets.QDialog):
     def validate_and_accept(self):
         # Ensure at least one modifier is chosen when enabled
         if self.hk_enabled.isChecked():
-            if not (self.hk_ctrl.isChecked() or self.hk_alt.isChecked() or self.hk_shift.isChecked()):
+            if not (
+                self.hk_ctrl.isChecked()
+                or self.hk_alt.isChecked()
+                or self.hk_shift.isChecked()
+            ):
                 self.err.setText("⚠️ " + tr("Hotkey selection err"))
                 return
         default_root = self.default_root_edit.text().strip()
-        if default_root and (not Path(default_root).exists() or not Path(default_root).is_dir()):
+        if default_root and (
+            not Path(default_root).exists() or not Path(default_root).is_dir()
+        ):
             self.err.setText(tr("Root invalid"))
             return
         self.accept()
@@ -981,7 +1126,11 @@ class SettingsDialog(QtWidgets.QDialog):
             t = self.tags_list.item(i).text().strip()
             if t:
                 tags.append(t)
-        saved_queries = [part.strip() for part in self.search_saved_queries.text().split(",") if part.strip()]
+        saved_queries = [
+            part.strip()
+            for part in self.search_saved_queries.text().split(",")
+            if part.strip()
+        ]
         return {
             "schema_version": 2,
             "language": self.lang_combo.currentData(),
@@ -1009,13 +1158,19 @@ class SettingsDialog(QtWidgets.QDialog):
             "recent_files_background": bool(self.background_recent.isChecked()),
             "list_page_size": int(self.page_size_spin.value()),
             "recent_files_include": [
-                part.strip() for part in self.include_patterns.text().split(",") if part.strip()
+                part.strip()
+                for part in self.include_patterns.text().split(",")
+                if part.strip()
             ],
             "recent_files_exclude_patterns": [
-                part.strip() for part in self.exclude_patterns.text().split(",") if part.strip()
+                part.strip()
+                for part in self.exclude_patterns.text().split(",")
+                if part.strip()
             ],
             "process_keywords": [
-                part.strip() for part in self.process_keywords.text().split(",") if part.strip()
+                part.strip()
+                for part in self.process_keywords.text().split(",")
+                if part.strip()
             ],
             "archive_after_days": int(self.archive_after_days.value()),
             "archive_skip_pinned": bool(self.archive_skip_pinned.isChecked()),
@@ -1027,14 +1182,20 @@ class SettingsDialog(QtWidgets.QDialog):
             "dev_flags": {
                 "sync_enabled": bool(self.flag_sync_enabled.isChecked()),
                 "security_enabled": bool(self.flag_security_enabled.isChecked()),
-                "advanced_search_enabled": bool(self.flag_adv_search_enabled.isChecked()),
-                "restore_profiles_enabled": bool(self.flag_restore_profiles_enabled.isChecked()),
+                "advanced_search_enabled": bool(
+                    self.flag_adv_search_enabled.isChecked()
+                ),
+                "restore_profiles_enabled": bool(
+                    self.flag_restore_profiles_enabled.isChecked()
+                ),
             },
             "sync": {
                 "provider": str(self.sync_provider.currentData() or "local"),
                 "local_root": self.sync_local_root.text().strip(),
                 "auto_interval_min": int(self.sync_interval_minutes.value()),
-                "last_cursor": str(self._settings.get("sync", {}).get("last_cursor", "")),
+                "last_cursor": str(
+                    self._settings.get("sync", {}).get("last_cursor", "")
+                ),
             },
             "security": {
                 "dpapi_enabled": bool(self.dpapi_enabled.isChecked()),
@@ -1049,7 +1210,9 @@ class SettingsDialog(QtWidgets.QDialog):
             },
             "restore_profiles": self._restore_profiles_cache,
             "recent_files_exclude": [
-                part.strip() for part in self.exclude_dirs.text().split(",") if part.strip()
+                part.strip()
+                for part in self.exclude_dirs.text().split(",")
+                if part.strip()
             ],
             "restore": {
                 "open_folder": bool(self.rs_folder.isChecked()),

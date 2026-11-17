@@ -90,7 +90,9 @@ class SyncEngine:
             try:
                 snap = migrate_snapshot(json.loads(p.read_text(encoding="utf-8")))
             except Exception as exc:
-                LOGGER.warning("sync_pull skip corrupted local snapshot %s: %s", p.name, exc)
+                LOGGER.warning(
+                    "sync_pull skip corrupted local snapshot %s: %s", p.name, exc
+                )
                 continue
             sid = str(snap.get("id") or "").strip()
             if not is_valid_snapshot_id(sid):
@@ -108,7 +110,9 @@ class SyncEngine:
             snap = migrate_snapshot(dict(raw))
             sid = str(snap.get("id") or "").strip()
             if not is_valid_snapshot_id(sid):
-                LOGGER.warning("sync_pull skip snapshot with invalid remote id: %s", sid)
+                LOGGER.warning(
+                    "sync_pull skip snapshot with invalid remote id: %s", sid
+                )
                 continue
             out[sid] = snap
         return out
@@ -170,14 +174,21 @@ class SyncEngine:
             if deleted_at > previous:
                 merged[sid] = deleted_at
         return self.snapshot_service.normalize_tombstones(
-            [{"id": sid, "deleted_at": deleted_at} for sid, deleted_at in merged.items()]
+            [
+                {"id": sid, "deleted_at": deleted_at}
+                for sid, deleted_at in merged.items()
+            ]
         )
 
     def _record_conflicts(self, conflicts: List[SyncConflict]) -> None:
         if not conflicts:
             return
         history = load_json(self.conflicts_path, default={"conflicts": []})
-        items = history.get("conflicts", []) if isinstance(history.get("conflicts"), list) else []
+        items = (
+            history.get("conflicts", [])
+            if isinstance(history.get("conflicts"), list)
+            else []
+        )
         stamp = now_iso()
         for c in conflicts:
             items.insert(
@@ -201,18 +212,28 @@ class SyncEngine:
     def sync(self) -> Dict[str, Any]:
         LOGGER.info("sync_pull provider=%s", self.provider.name)
         remote = self.provider.pull()
-        local_index = self.snapshot_service.migrate_index(load_json(self.local_index_path, default={"snapshots": []}))
-        remote_index = self.snapshot_service.migrate_index(remote.index if isinstance(remote.index, dict) else {"snapshots": []})
+        local_index = self.snapshot_service.migrate_index(
+            load_json(self.local_index_path, default={"snapshots": []})
+        )
+        remote_index = self.snapshot_service.migrate_index(
+            remote.index if isinstance(remote.index, dict) else {"snapshots": []}
+        )
         local_map = self._load_local_snapshots()
         remote_map = self._payload_map(remote.snapshots)
-        local_tombstones = self.snapshot_service.normalize_tombstones(local_index.get("tombstones", []))
-        remote_tombstones = self.snapshot_service.normalize_tombstones(remote_index.get("tombstones", []))
+        local_tombstones = self.snapshot_service.normalize_tombstones(
+            local_index.get("tombstones", [])
+        )
+        remote_tombstones = self.snapshot_service.normalize_tombstones(
+            remote_index.get("tombstones", [])
+        )
 
         merged: Dict[str, Dict[str, Any]] = {}
         conflicts: List[SyncConflict] = []
 
         for sid in sorted(set(local_map.keys()) | set(remote_map.keys())):
-            winner, conflict = self._choose_winner(sid, local_map.get(sid), remote_map.get(sid))
+            winner, conflict = self._choose_winner(
+                sid, local_map.get(sid), remote_map.get(sid)
+            )
             if winner:
                 merged[sid] = winner
             if conflict:
@@ -249,12 +270,23 @@ class SyncEngine:
         merged_index: Dict[str, Any] = copy.deepcopy(local_index_map)
         if not isinstance(merged_index.get("snapshots"), list):
             merged_index["snapshots"] = []
-        merged_index["schema_version"] = max(2, self._to_int(merged_index.get("schema_version", 1), 1))
+        merged_index["schema_version"] = max(
+            2, self._to_int(merged_index.get("schema_version", 1), 1)
+        )
         merged_index["updated_at"] = now_iso()
         merged_index["rev"] = self._to_int(merged_index.get("rev", 1), 1) + 1
-        merged_index["search_meta"] = merged_index.get("search_meta") if isinstance(merged_index.get("search_meta"), dict) else {"engine": "blob", "version": 2}
+        merged_index["search_meta"] = (
+            merged_index.get("search_meta")
+            if isinstance(merged_index.get("search_meta"), dict)
+            else {"engine": "blob", "version": 2}
+        )
         merged_index["tombstones"] = merged_tombstones
-        merged_index["snapshots"] = [self._entry_from_snapshot(s) for _, s in sorted(merged.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)]
+        merged_index["snapshots"] = [
+            self._entry_from_snapshot(s)
+            for _, s in sorted(
+                merged.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True
+            )
+        ]
         merged_index = self.snapshot_service.migrate_index(merged_index)
         save_json(self.local_index_path, merged_index)
 
@@ -265,7 +297,11 @@ class SyncEngine:
         push_index = copy.deepcopy(merged_index)
         push_index["snapshots"] = [
             self._entry_from_snapshot(s)
-            for _, s in sorted(push_map.items(), key=lambda kv: kv[1].get("created_at", ""), reverse=True)
+            for _, s in sorted(
+                push_map.items(),
+                key=lambda kv: kv[1].get("created_at", ""),
+                reverse=True,
+            )
         ]
         push_index = self.snapshot_service.migrate_index(push_index)
 

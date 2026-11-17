@@ -3,6 +3,7 @@ CtxSnap Modern Design System
 A comprehensive styling module with modern aesthetics, glassmorphism effects,
 and smooth micro-animations.
 """
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 _WHEEL_FILTERS: dict[int, QtCore.QObject] = {}
@@ -13,7 +14,7 @@ _WHEEL_FILTERS: dict[int, QtCore.QObject] = {}
 # ============================================================
 class NoScrollMixin:
     """Mixin to prevent wheel events from changing values unless focused."""
-    
+
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         widget = self if isinstance(self, QtWidgets.QWidget) else None
         if widget is not None and widget.hasFocus():
@@ -28,24 +29,28 @@ class NoScrollMixin:
 
 class NoScrollComboBox(NoScrollMixin, QtWidgets.QComboBox):
     """ComboBox that ignores wheel events unless focused."""
+
     pass
 
 
 class NoScrollSpinBox(NoScrollMixin, QtWidgets.QSpinBox):
     """SpinBox that ignores wheel events unless focused."""
+
     pass
 
 
 class NoScrollDoubleSpinBox(NoScrollMixin, QtWidgets.QDoubleSpinBox):
     """DoubleSpinBox that ignores wheel events unless focused."""
+
     pass
 
 
 def disable_wheel_scroll(widget: QtWidgets.QWidget) -> None:
     """
-    Install an event filter on a widget to prevent wheel events 
+    Install an event filter on a widget to prevent wheel events
     from changing its value unless it has focus.
     """
+
     class WheelFilter(QtCore.QObject):
         def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
             if event.type() == QtCore.QEvent.Type.Wheel:
@@ -53,14 +58,17 @@ def disable_wheel_scroll(widget: QtWidgets.QWidget) -> None:
                     event.ignore()
                     return True
             return False
-    
+
     # Hold a strong reference to the filter to prevent garbage collection.
     wheel_filter = WheelFilter(widget)
     widget_id = id(widget)
     _WHEEL_FILTERS[widget_id] = wheel_filter
-    widget.destroyed.connect(lambda _=None, wid=widget_id: _WHEEL_FILTERS.pop(wid, None))
+    widget.destroyed.connect(
+        lambda _=None, wid=widget_id: _WHEEL_FILTERS.pop(wid, None)
+    )
     widget.installEventFilter(wheel_filter)
     widget.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+
 
 # ============================================================
 # Design Tokens
@@ -72,26 +80,21 @@ COLORS = {
     "bg_tertiary": "#24243a",
     "bg_card": "rgba(26, 26, 36, 0.85)",
     "bg_input": "rgba(15, 15, 20, 0.7)",
-    
     # Accents
     "accent": "#7c5cff",
     "accent_hover": "#9175ff",
     "accent_light": "rgba(124, 92, 255, 0.15)",
-    
     # Text
     "text_primary": "#f0f0f5",
     "text_secondary": "#9090a8",
     "text_muted": "#606078",
-    
     # Borders
     "border": "#2a2a40",
     "border_light": "rgba(42, 42, 64, 0.5)",
-    
     # Status
     "success": "#22c55e",
     "warning": "#f59e0b",
     "danger": "#ef4444",
-    
     # Special
     "pinned": "#fbbf24",
     "archived": "#6b7280",
@@ -601,38 +604,42 @@ QTextBrowser {
 def set_pretty_style(app: QtWidgets.QApplication) -> None:
     """Apply the modern design system to the application."""
     app.setStyle("Fusion")
-    
+
     # Create a dark, modern palette
     palette = QtGui.QPalette()
-    
+
     # Window colors
     palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(15, 15, 20))
     palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(240, 240, 245))
-    
+
     # Base colors (for input fields, lists)
     palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(26, 26, 36))
     palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(36, 36, 58))
-    
+
     # Text colors
     palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(240, 240, 245))
-    palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor(96, 96, 120))
-    
+    palette.setColor(
+        QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor(96, 96, 120)
+    )
+
     # Button colors
     palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(36, 36, 58))
     palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor(240, 240, 245))
-    
+
     # Highlight colors (selection)
     palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(124, 92, 255))
-    palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(255, 255, 255))
-    
+    palette.setColor(
+        QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(255, 255, 255)
+    )
+
     # Tooltip colors
     palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, QtGui.QColor(36, 36, 58))
     palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, QtGui.QColor(240, 240, 245))
-    
+
     # Link color
     palette.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor(124, 92, 255))
     palette.setColor(QtGui.QPalette.ColorRole.LinkVisited, QtGui.QColor(167, 139, 250))
-    
+
     # Disabled colors
     palette.setColor(
         QtGui.QPalette.ColorGroup.Disabled,
@@ -644,5 +651,5 @@ def set_pretty_style(app: QtWidgets.QApplication) -> None:
         QtGui.QPalette.ColorRole.ButtonText,
         QtGui.QColor(96, 96, 120),
     )
-    
+
     app.setPalette(palette)

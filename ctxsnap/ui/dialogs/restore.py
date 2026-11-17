@@ -38,18 +38,20 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox(tr("Restore Options"))
         options_layout = QtWidgets.QVBoxLayout(options_group)
         options_layout.setSpacing(8)
-        
+
         self.cb_folder = QtWidgets.QCheckBox("📁 " + tr("Open folder"))
         self.cb_terminal = QtWidgets.QCheckBox("💻 " + tr("Open terminal"))
         self.cb_vscode = QtWidgets.QCheckBox("🔷 " + tr("Open VSCode"))
         self.cb_running_apps = QtWidgets.QCheckBox("📱 " + tr("Open running apps"))
-        self.cb_checklist = QtWidgets.QCheckBox("✅ " + tr("Show post-restore checklist"))
+        self.cb_checklist = QtWidgets.QCheckBox(
+            "✅ " + tr("Show post-restore checklist")
+        )
         self.cb_folder.setChecked(open_folder)
         self.cb_terminal.setChecked(open_terminal)
         self.cb_vscode.setChecked(open_vscode)
         self.cb_running_apps.setChecked(open_running_apps)
         self.cb_checklist.setChecked(show_checklist)
-        
+
         options_layout.addWidget(self.cb_folder)
         options_layout.addWidget(self.cb_terminal)
         options_layout.addWidget(self.cb_vscode)
@@ -57,7 +59,11 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         options_layout.addWidget(self.cb_checklist)
 
         self.profile_combo: Optional[QtWidgets.QComboBox] = None
-        self._profiles = [p for p in (profiles or []) if isinstance(p, dict) and str(p.get("name", "")).strip()]
+        self._profiles = [
+            p
+            for p in (profiles or [])
+            if isinstance(p, dict) and str(p.get("name", "")).strip()
+        ]
         if self._profiles:
             profile_row = QtWidgets.QHBoxLayout()
             profile_label = QtWidgets.QLabel("🧩 " + tr("Restore Profile"))
@@ -87,7 +93,7 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         todos = snap.get("todos", [])
         recent = snap.get("recent_files", [])
         running_apps = snap.get("running_apps", [])
-        
+
         # Apps list (if any)
         self.apps_list = QtWidgets.QListWidget()
         self.apps_list.setSelectionMode(
@@ -95,7 +101,7 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         )
         self.apps_list.setMaximumHeight(120)
         for app in running_apps:
-            label = f"  {app.get('name','')}  •  {app.get('exe','')}"
+            label = f"  {app.get('name', '')}  •  {app.get('exe', '')}"
             item = QtWidgets.QListWidgetItem(label)
             item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
@@ -110,11 +116,16 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         info = QtWidgets.QTextEdit()
         info.setReadOnly(True)
         info.setPlaceholderText(tr("Snapshot details"))
-        
-        todo_text = "\n".join([f"  {i+1}. {t}" for i, t in enumerate(todos[:3]) if t])
+
+        todo_text = "\n".join([f"  {i + 1}. {t}" for i, t in enumerate(todos[:3]) if t])
         recent_text = "\n".join([f"  • {p}" for p in recent[:8]])
-        apps_text = "\n".join([f"  • {p.get('name','')}  →  {p.get('exe','')}" for p in running_apps[:6]])
-        
+        apps_text = "\n".join(
+            [
+                f"  • {p.get('name', '')}  →  {p.get('exe', '')}"
+                for p in running_apps[:6]
+            ]
+        )
+
         info.setText(
             f"📂 Root:\n  {root}\n\n"
             f"📝 Note:\n  {note or '(none)'}\n\n"
@@ -144,13 +155,13 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         layout.addWidget(hint)
         layout.addSpacing(8)
         layout.addWidget(options_group)
-        
+
         if running_apps:
             apps_label = QtWidgets.QLabel("📱 " + tr("Running apps to restore"))
             apps_label.setObjectName("SubtitleLabel")
             layout.addWidget(apps_label)
             layout.addWidget(self.apps_list)
-            
+
         layout.addSpacing(8)
         layout.addWidget(info, 1)
         layout.addLayout(btn_row)
@@ -161,11 +172,21 @@ class RestorePreviewDialog(QtWidgets.QDialog):
         profile = self.profile_combo.itemData(row)
         if not isinstance(profile, dict):
             return
-        self.cb_folder.setChecked(bool(profile.get("open_folder", self.cb_folder.isChecked())))
-        self.cb_terminal.setChecked(bool(profile.get("open_terminal", self.cb_terminal.isChecked())))
-        self.cb_vscode.setChecked(bool(profile.get("open_vscode", self.cb_vscode.isChecked())))
-        self.cb_running_apps.setChecked(bool(profile.get("open_running_apps", self.cb_running_apps.isChecked())))
-        self.cb_checklist.setChecked(bool(profile.get("show_checklist", self.cb_checklist.isChecked())))
+        self.cb_folder.setChecked(
+            bool(profile.get("open_folder", self.cb_folder.isChecked()))
+        )
+        self.cb_terminal.setChecked(
+            bool(profile.get("open_terminal", self.cb_terminal.isChecked()))
+        )
+        self.cb_vscode.setChecked(
+            bool(profile.get("open_vscode", self.cb_vscode.isChecked()))
+        )
+        self.cb_running_apps.setChecked(
+            bool(profile.get("open_running_apps", self.cb_running_apps.isChecked()))
+        )
+        self.cb_checklist.setChecked(
+            bool(profile.get("show_checklist", self.cb_checklist.isChecked()))
+        )
 
     def choices(self) -> Dict[str, Any]:
         selected_apps = []
@@ -197,7 +218,7 @@ class ChecklistDialog(QtWidgets.QDialog):
 
         title = QtWidgets.QLabel("✅ " + tr("Post-restore checklist"))
         title.setObjectName("TitleLabel")
-        
+
         hint = QtWidgets.QLabel(tr("Checklist hint"))
         hint.setObjectName("HintLabel")
 
@@ -207,7 +228,7 @@ class ChecklistDialog(QtWidgets.QDialog):
         )
         for i, t in enumerate(todos):
             if t:  # Skip empty todos
-                it = QtWidgets.QListWidgetItem(f"  {i+1}. {t}")
+                it = QtWidgets.QListWidgetItem(f"  {i + 1}. {t}")
                 it.setFlags(it.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
                 it.setCheckState(QtCore.Qt.CheckState.Unchecked)
                 self.listw.addItem(it)
@@ -215,7 +236,7 @@ class ChecklistDialog(QtWidgets.QDialog):
         btn_ok = QtWidgets.QPushButton("✓ " + tr("Done"))
         btn_ok.setProperty("primary", True)
         btn_ok.clicked.connect(self.accept)
-        
+
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(10)
         btn_row.addStretch(1)

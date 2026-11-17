@@ -550,11 +550,11 @@ TRANSLATIONS = {
         "Select a conflict to view details.": "충돌 항목을 선택하여 상세 내용을 확인하세요.",
         "No sync conflicts yet": "동기화 충돌이 없습니다.",
         "Open Sync Conflicts": "동기화 충돌 열기",
-    }
-
+    },
 }
 
 CURRENT_LANG = "en"
+
 
 def get_system_lang() -> str:
     try:
@@ -565,12 +565,14 @@ def get_system_lang() -> str:
         pass
     return "en"
 
+
 def set_language(lang_code: Optional[str]) -> None:
     global CURRENT_LANG
     if not lang_code or lang_code == "auto":
         CURRENT_LANG = get_system_lang()
     else:
         CURRENT_LANG = lang_code
+
 
 def tr(key: str) -> str:
     return TRANSLATIONS.get(CURRENT_LANG, {}).get(key, TRANSLATIONS["en"].get(key, key))

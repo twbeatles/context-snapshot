@@ -52,11 +52,19 @@ class MainWindowAutomationSection:
             self.backup_timer.start()
 
     def _init_sync_engine(self, settings_override: object | None = None) -> None:
-        active_settings = migrate_settings(settings_override) if isinstance(settings_override, dict) else self.settings
+        active_settings = (
+            migrate_settings(settings_override)
+            if isinstance(settings_override, dict)
+            else self.settings
+        )
         sync_cfg = active_settings.get("sync", {})
-        provider_name = str(sync_cfg.get("provider", "local") or "local").strip().lower()
+        provider_name = (
+            str(sync_cfg.get("provider", "local") or "local").strip().lower()
+        )
         if provider_name == "local":
-            local_root = Path(str(sync_cfg.get("local_root", app_dir() / "sync_local"))).expanduser()
+            local_root = Path(
+                str(sync_cfg.get("local_root", app_dir() / "sync_local"))
+            ).expanduser()
             provider = LocalSyncProvider(local_root)
         else:
             provider = CloudStubSyncProvider()
@@ -69,7 +77,9 @@ class MainWindowAutomationSection:
         )
 
     def _update_sync_timer(self) -> None:
-        sync_enabled = bool(self.settings.get("dev_flags", {}).get("sync_enabled", False))
+        sync_enabled = bool(
+            self.settings.get("dev_flags", {}).get("sync_enabled", False)
+        )
         minutes = int(self.settings.get("sync", {}).get("auto_interval_min", 0))
         if not sync_enabled or minutes <= 0:
             self.sync_timer.stop()
@@ -79,8 +89,14 @@ class MainWindowAutomationSection:
             self.sync_timer.start()
 
     def _run_scheduled_sync(self, settings_override: object | None = None) -> None:
-        active_settings = migrate_settings(settings_override) if isinstance(settings_override, dict) else self.settings
-        sync_enabled = bool(active_settings.get("dev_flags", {}).get("sync_enabled", False))
+        active_settings = (
+            migrate_settings(settings_override)
+            if isinstance(settings_override, dict)
+            else self.settings
+        )
+        sync_enabled = bool(
+            active_settings.get("dev_flags", {}).get("sync_enabled", False)
+        )
         if not sync_enabled or not self.sync_engine:
             return
         try:
@@ -102,7 +118,10 @@ class MainWindowAutomationSection:
                 3500,
             )
         except Exception as exc:
-            log_exc("scheduled sync", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            log_exc(
+                "scheduled sync",
+                exc if isinstance(exc, Exception) else Exception(str(exc)),
+            )
             self.statusBar().showMessage(tr("Sync failed status"), 3500)
 
     def _run_scheduled_backup(self) -> None:
@@ -131,7 +150,10 @@ class MainWindowAutomationSection:
         try:
             backups_dir = app_dir() / "backups"
             if backups_dir.exists():
-                backups = sorted(backups_dir.glob(f"{APP_NAME}_autobackup_*.json"), key=lambda p: p.stat().st_mtime)
+                backups = sorted(
+                    backups_dir.glob(f"{APP_NAME}_autobackup_*.json"),
+                    key=lambda p: p.stat().st_mtime,
+                )
                 while len(backups) > 5:
                     old = backups.pop(0)
                     try:
@@ -196,13 +218,17 @@ class MainWindowAutomationSection:
         source = "auto_timer" if trigger == "timer" else "auto_git"
         root_raw = str(self.settings.get("default_root", "")).strip()
         if not root_raw:
-            self.statusBar().showMessage("Auto snapshot skipped: default root is empty.", 3000)
+            self.statusBar().showMessage(
+                "Auto snapshot skipped: default root is empty.", 3000
+            )
             LOGGER.warning("Auto snapshot skipped: default_root is empty.")
             return
 
         root_path = Path(root_raw).expanduser()
         if not root_path.exists() or not root_path.is_dir():
-            self.statusBar().showMessage("Auto snapshot skipped: default root is invalid.", 3000)
+            self.statusBar().showMessage(
+                "Auto snapshot skipped: default root is invalid.", 3000
+            )
             LOGGER.warning("Auto snapshot skipped: invalid root=%s", root_path)
             return
         root_path = root_path.resolve()
@@ -210,7 +236,9 @@ class MainWindowAutomationSection:
         seed = self._auto_seed_snapshot(root_path)
         seed_workspace = str(seed.get("vscode_workspace", "")).strip() if seed else ""
         seed_note = str(seed.get("note", "")).strip() if seed else ""
-        seed_todos = self._normalized_todos(seed.get("todos", ["", "", ""]) if seed else ["", "", ""])
+        seed_todos = self._normalized_todos(
+            seed.get("todos", ["", "", ""]) if seed else ["", "", ""]
+        )
         seed_tags = self._normalized_tags(seed.get("tags", []) if seed else [])
 
         if not seed_workspace:
@@ -233,7 +261,9 @@ class MainWindowAutomationSection:
             git_state_data=git_state_data,
         )
         if self._is_duplicate_auto_snapshot(root_path, auto_fp):
-            self.statusBar().showMessage("Auto snapshot skipped: no changes detected.", 2500)
+            self.statusBar().showMessage(
+                "Auto snapshot skipped: no changes detected.", 2500
+            )
             return
 
         self._create_snapshot(
@@ -289,18 +319,29 @@ class MainWindowAutomationSection:
         try:
             snap["recent_files"] = files
             snap = self.snapshot_service.touch_snapshot(snap)
-            snap = self._persist_snapshot_or_raise(snap_path, snap, f"snapshot recent files {sid}")
+            snap = self._persist_snapshot_or_raise(
+                snap_path, snap, f"snapshot recent files {sid}"
+            )
             snap_mtime = snapshot_mtime(snap_path)
             for it in self.index.get("snapshots", []):
                 if it.get("id") == sid:
-                    it.update(self._index_entry_from_snapshot_data(snap, snap_mtime=snap_mtime))
+                    it.update(
+                        self._index_entry_from_snapshot_data(
+                            snap, snap_mtime=snap_mtime
+                        )
+                    )
                     break
             self.index = self.snapshot_service.touch_index(self.index)
             self._save_json_or_raise(self.index_path, self.index, "index")
             self.refresh_list(reset_page=False)
-            self.statusBar().showMessage(tr("Recent files updated in background."), 2500)
+            self.statusBar().showMessage(
+                tr("Recent files updated in background."), 2500
+            )
         except Exception as exc:
-            log_exc(f"recent files update ({sid})", exc if isinstance(exc, Exception) else Exception(str(exc)))
+            log_exc(
+                f"recent files update ({sid})",
+                exc if isinstance(exc, Exception) else Exception(str(exc)),
+            )
             self.index = prev_index
             try:
                 self._save_snapshot_or_raise(
@@ -311,8 +352,9 @@ class MainWindowAutomationSection:
             except Exception as rollback_exc:
                 log_exc("rollback recent files snapshot file", rollback_exc)
             if not save_json(self.index_path, self.index):
-                LOGGER.error("Failed to rollback index after recent files update error.")
+                LOGGER.error(
+                    "Failed to rollback index after recent files update error."
+                )
 
     def _on_recent_files_failed(self, sid: str, error: str) -> None:
         log_exc(f"recent files background scan ({sid})", Exception(error))
-

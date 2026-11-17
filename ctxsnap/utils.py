@@ -98,9 +98,9 @@ def recent_files_under(
     while stack:
         if truncated_reason:
             break
-            
+
         current_dir = stack.pop()
-        
+
         try:
             # os.scandir is faster than Path.iterdir or rglob as it yields DirEntry objects with cached stat
             with os.scandir(current_dir) as entries:
@@ -127,14 +127,17 @@ def recent_files_under(
                         if entry_name_lower in exclude_dirs_set:
                             continue
                         # Skip if dir matches exclude patterns (broad check)
-                        # (Optimized: Checking directory name against globs might be aggressive, 
+                        # (Optimized: Checking directory name against globs might be aggressive,
                         # but standard usage usually implies excluding folder names)
-                        if exclude_globs and any(fnmatch.fnmatch(entry_name_lower, pat) for pat in exclude_globs):
+                        if exclude_globs and any(
+                            fnmatch.fnmatch(entry_name_lower, pat)
+                            for pat in exclude_globs
+                        ):
                             continue
-                        
+
                         stack.append(Path(entry.path))
                         continue
-                    
+
                     # 2. File handling
                     if not entry.is_file(follow_symlinks=False):
                         continue
@@ -142,15 +145,19 @@ def recent_files_under(
                     # Skip hidden files
                     if entry.name.startswith("."):
                         continue
-                    
+
                     scanned_count += 1
-                    
+
                     # File-level Excludes
-                    if exclude_globs and any(fnmatch.fnmatch(entry_name_lower, pat) for pat in exclude_globs):
+                    if exclude_globs and any(
+                        fnmatch.fnmatch(entry_name_lower, pat) for pat in exclude_globs
+                    ):
                         continue
-                        
+
                     # File-level Includes (if specified, must match at least one)
-                    if include_globs and not any(fnmatch.fnmatch(entry_name_lower, pat) for pat in include_globs):
+                    if include_globs and not any(
+                        fnmatch.fnmatch(entry_name_lower, pat) for pat in include_globs
+                    ):
                         continue
 
                     try:
@@ -159,7 +166,7 @@ def recent_files_under(
                         files.append((mtime, Path(entry.path)))
                     except OSError:
                         pass
-                        
+
         except (PermissionError, OSError):
             continue
 
@@ -190,12 +197,14 @@ def list_processes_filtered(keywords: Optional[List[str]] = None) -> List[Proces
                 raw_name = str(proc.info.get("name") or "")
                 raw_exe = str(proc.info.get("exe") or "")
                 cmdline = _to_str_list(proc.info.get("cmdline"), max_items=6)
-                out.append({
-                    "pid": pid,
-                    "name": raw_name,
-                    "exe": raw_exe,
-                    "cmdline": cmdline,
-                })
+                out.append(
+                    {
+                        "pid": pid,
+                        "name": raw_name,
+                        "exe": raw_exe,
+                        "cmdline": cmdline,
+                    }
+                )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     seen: set[Tuple[str, str]] = set()
@@ -261,7 +270,9 @@ def list_running_apps() -> List[RunningAppInfo]:
     return results
 
 
-def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidgets.QWidget] = None) -> List[str]:
+def restore_running_apps(
+    apps: List[Dict[str, object]], parent: Optional[QtWidgets.QWidget] = None
+) -> List[str]:
     if not apps:
         return []
     running: set[str] = set()
@@ -289,11 +300,15 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
                 if launch_cmd[0] and not Path(launch_cmd[0]).exists() and exe:
                     launch_cmd = [exe]
                 if not Path(launch_cmd[0]).exists():
-                    failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (path missing)")
+                    failures.append(
+                        f"{app.get('name') or app.get('exe') or 'unknown'} (path missing)"
+                    )
                     continue
                 subprocess.Popen(launch_cmd, shell=False)
             else:
-                failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (no command)")
+                failures.append(
+                    f"{app.get('name') or app.get('exe') or 'unknown'} (no command)"
+                )
         except Exception:
             LOGGER.exception("restore running app")
             failures.append(f"{app.get('name') or app.get('exe') or 'unknown'} (error)")
@@ -301,7 +316,9 @@ def restore_running_apps(apps: List[Dict[str, object]], parent: Optional[QtWidge
         QtWidgets.QMessageBox.information(
             parent,
             tr("Restore"),
-            tr("Failed to restore some apps") + ":\n" + "\n".join(sorted(set(failures))),
+            tr("Failed to restore some apps")
+            + ":\n"
+            + "\n".join(sorted(set(failures))),
         )
     return failures
 
@@ -328,7 +345,6 @@ def build_search_blob(snap: Dict[str, object]) -> str:
     return " ".join(p for p in parts if p).lower()
 
 
-
 def snapshot_mtime(path: Path) -> float:
     try:
         return path.stat().st_mtime
@@ -341,9 +357,17 @@ def git_title_suggestion(root: Path) -> Optional[str]:
     if not git:
         return None
     try:
-        subprocess.check_output([git, "-C", str(root), "rev-parse", "--show-toplevel"], text=True, timeout=5)
-        branch = subprocess.check_output([git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], text=True, timeout=5).strip()
-        subj = subprocess.check_output([git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True, timeout=5).strip()
+        subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "--show-toplevel"], text=True, timeout=5
+        )
+        branch = subprocess.check_output(
+            [git, "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True,
+            timeout=5,
+        ).strip()
+        subj = subprocess.check_output(
+            [git, "-C", str(root), "log", "-1", "--pretty=%s"], text=True, timeout=5
+        ).strip()
         return f"{root.name} [{branch}] - {subj}"
     except Exception as e:
         LOGGER.debug("Git title suggestion failed: %s", e)
